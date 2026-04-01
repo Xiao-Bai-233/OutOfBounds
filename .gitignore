@@ -1,0 +1,44 @@
+# Unity
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Uu]ser[Ss]ettings/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.csproj
+*.sln
+*.userprefs
+*.user
+
+# Monodevelop
+*.pidb
+*.userprefs
+
+# JetBrains Rider
+.idea/
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+
+# Package Manager
+Packages/packages-lock.json
+Packages/manifest.json
+
+# Gradle
+.gradle/
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+# URP (keep these if you want to regenerate)
+/[Aa]ssets/External/
