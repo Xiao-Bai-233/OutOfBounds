@@ -72,9 +72,9 @@ public class PlayerController : MonoBehaviour
         }
 
         // 跳跃中断检测（松开跳跃键）
-        if (jumpAction.WasReleasedThisFrame() && rb.velocity.y > 0)
+        if (jumpAction.WasReleasedThisFrame() && rb.linearVelocity.y > 0)
         {
-            rb.velocity = new Vector2(rb.velocity.x, rb.velocity.y * jumpCutMultiplier);
+            rb.linearVelocity = new Vector2(rb.linearVelocity.x, rb.linearVelocity.y * jumpCutMultiplier);
         }
 
         // 翻转角色朝向
@@ -90,7 +90,7 @@ public class PlayerController : MonoBehaviour
         HandleJump();
 
         // 更新当前速度
-        currentVelocity = rb.velocity;
+        currentVelocity = rb.linearVelocity;
     }
 
     #endregion
@@ -131,14 +131,14 @@ public class PlayerController : MonoBehaviour
     private void HandleMovement()
     {
         float targetVelocityX = moveInput.x * moveSpeed;
-        float velocityDifference = targetVelocityX - rb.velocity.x;
+        float velocityDifference = targetVelocityX - rb.linearVelocity.x;
         float accelerationRate = Mathf.Abs(targetVelocityX) > 0.01f ? acceleration : deceleration;
 
         // 使用 SmoothDamp 平滑过渡
-        float newVelocityX = Mathf.MoveTowards(rb.velocity.x, targetVelocityX,
+        float newVelocityX = Mathf.MoveTowards(rb.linearVelocity.x, targetVelocityX,
             accelerationRate * Time.fixedDeltaTime);
 
-        rb.velocity = new Vector2(newVelocityX, rb.velocity.y);
+        rb.linearVelocity = new Vector2(newVelocityX, rb.linearVelocity.y);
     }
 
     private void HandleFlip()
@@ -174,7 +174,7 @@ public class PlayerController : MonoBehaviour
         }
 
         // 更新跳跃状态
-        isJumping = rb.velocity.y > 0 || (isJumping && !IsGrounded());
+        isJumping = rb.linearVelocity.y > 0 || (isJumping && !IsGrounded());
     }
 
     private bool CanJump()
@@ -192,7 +192,7 @@ public class PlayerController : MonoBehaviour
     private void ExecuteJump()
     {
         // 设置跳跃速度
-        rb.velocity = new Vector2(rb.velocity.x, jumpForce);
+        rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
         isJumping = true;
 
         // 触发跳跃事件（可用于播放音效等）
@@ -205,6 +205,9 @@ public class PlayerController : MonoBehaviour
 
     private bool IsGrounded()
     {
+        // 空检查：防止编辑器中未初始化时调用
+        if (col == null) return false;
+
         // 使用圆形检测
         Vector2 checkPosition = (Vector2)transform.position + groundCheckOffset;
         float checkRadius = col.bounds.extents.x;
@@ -224,13 +227,13 @@ public class PlayerController : MonoBehaviour
     // 公共属性
     public bool IsGroundedState => IsGrounded();
     public bool IsJumpingState => isJumping;
-    public Vector2 Velocity => rb.velocity;
+    public Vector2 Velocity => rb.linearVelocity;
     public float MoveSpeed => moveSpeed;
 
     // 强制设置速度（用于外部影响，如击退等）
     public void SetVelocity(Vector2 velocity)
     {
-        rb.velocity = velocity;
+        rb.linearVelocity = velocity;
     }
 
     // 添加冲击力

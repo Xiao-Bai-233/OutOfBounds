@@ -3,16 +3,16 @@ using UnityEngine.EventSystems;
 
 /// <summary>
 /// 可拖拽的UI组件
-/// 处理鼠标/触摸拖拽交互
+/// 处理鼠标/触摸拖拽交互，支持右键切换固定模式
 /// </summary>
 [RequireComponent(typeof(UIPhysicsElement))]
-public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerEnterHandler, IPointerExitHandler
+public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
     [Header("拖拽设置")]
     [SerializeField] private bool canBeDragged = true;
     [SerializeField] private bool highlightOnHover = true;
-    [SerializeField] private float dragSpeed = 1f;
-    [SerializeField] private float releaseVelocityMultiplier = 1f;
+    [SerializeField] private float dragSpeed = 15f;
+    [SerializeField] private float releaseVelocityMultiplier = 5f;
 
     [Header("视觉效果")]
     [SerializeField] private Color normalColor = Color.white;
@@ -49,7 +49,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     // 事件
     public System.Action<DraggableUI> OnDragStart;
     public System.Action<DraggableUI> OnDragEnd;
-    public System.Action<DraggableUI, Vector2> OnDrag;
+    public System.Action<DraggableUI, Vector2> OnDragUpdate;
 
     #region Unity 生命周期
 
@@ -77,12 +77,33 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         // 计算释放速度
         if (isDragging)
         {
-            if (Time.time - lastVelocityUpdate > velocityUpdateInterval)
+            // 每帧都记录位置，用于计算速度
+            Vector2 currentPos;
+            
+            // World Space 模式下使用 position
+            if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
             {
-                releaseVelocity = (physicsElement.RectTransform.anchoredPosition - lastPosition) / velocityUpdateInterval;
-                lastPosition = physicsElement.RectTransform.anchoredPosition;
-                lastVelocityUpdate = Time.time;
+                currentPos = physicsElement.RectTransform.position;
             }
+            else
+            {
+                currentPos = physicsElement.RectTransform.anchoredPosition;
+            }
+            
+            // 计算瞬时速度
+            Vector2 frameVelocity = (currentPos - lastPosition) / Time.deltaTime;
+            
+            // 限制最大速度，防止飞出去
+            float maxSpeed = 10f; // 最大速度限制
+            if (frameVelocity.magnitude > maxSpeed)
+            {
+                frameVelocity = frameVelocity.normalized * maxSpeed;
+            }
+            
+            // 平滑速度变化
+            releaseVelocity = Vector2.Lerp(releaseVelocity, frameVelocity, 0.2f);
+            
+            lastPosition = currentPos;
         }
     }
 
@@ -168,12 +189,27 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         }
     }
 
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        // 右键点击切换固定模式
+        if (eventData.button == PointerEventData.InputButton.Right)
+        {
+            physicsElement.ToggleFixed();
+            
+            // 播放音效
+            PlaySound(hoverSound);
+        }
+    }
+
     #endregion
 
     #region IBeginDragHandler 接口
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        // 固定模式下不能拖拽
+        if (physicsElement.IsFixed) return;
+        
         if (!canBeDragged) return;
 
         // 检查是否在可拖拽UI层
@@ -188,7 +224,16 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         physicsElement.StartDrag();
         isDragging = true;
         releaseVelocity = Vector2.zero;
-        lastPosition = physicsElement.RectTransform.anchoredPosition;
+        
+        // World Space 模式下使用 position 而不是 anchoredPosition
+        if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
+        {
+            lastPosition = physicsElement.RectTransform.position;
+        }
+        else
+        {
+            lastPosition = physicsElement.RectTransform.anchoredPosition;
+        }
 
         // 更新层序，确保在最上层
         Canvas canvas = GetComponentInParent<Canvas>();
@@ -214,19 +259,22 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         // 获取鼠标世界坐标
         Vector2 mousePos = GetWorldMousePosition();
 
-        // 计算新位置（考虑偏移和缩放）
+        // 计算新位置（考虑偏移）
         Vector2 newWorldPos = mousePos + dragOffset;
-        Vector2 newAnchoredPos = ScreenToAnchoredPosition(newWorldPos);
 
-        // 应用拖拽速度缩放
-        newAnchoredPos = Vector2.Lerp(
-            physicsElement.RectTransform.anchoredPosition,
-            newAnchoredPos,
-            dragSpeed * Time.deltaTime * 60f
-        );
-
-        physicsElement.Drag(newAnchoredPos);
-        OnDrag?.Invoke(this, newAnchoredPos);
+        // World Space 模式下直接设置世界坐标
+        if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
+        {
+            physicsElement.RectTransform.position = newWorldPos;
+            OnDragUpdate?.Invoke(this, newWorldPos);
+        }
+        else
+        {
+            // Screen Space 模式下转换为 anchoredPosition
+            Vector2 newAnchoredPos = ScreenToAnchoredPosition(newWorldPos);
+            physicsElement.Drag(newAnchoredPos);
+            OnDragUpdate?.Invoke(this, newAnchoredPos);
+        }
     }
 
     #endregion
@@ -238,7 +286,23 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         if (!isDragging) return;
 
         // 结束拖拽，应用释放速度
-        physicsElement.EndDrag(releaseVelocity * releaseVelocityMultiplier);
+        // World Space 模式下速度单位不同，需要调整
+        float multiplier = releaseVelocityMultiplier;
+        if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
+        {
+            multiplier = 0.5f; // World Space 模式下减小速度倍数
+        }
+        
+        Vector2 finalVelocity = releaseVelocity * multiplier;
+        
+        // 再次限制速度
+        float maxReleaseSpeed = 8f;
+        if (finalVelocity.magnitude > maxReleaseSpeed)
+        {
+            finalVelocity = finalVelocity.normalized * maxReleaseSpeed;
+        }
+        
+        physicsElement.EndDrag(finalVelocity);
         isDragging = false;
 
         OnDragEnd?.Invoke(this);

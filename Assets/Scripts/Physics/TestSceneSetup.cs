@@ -233,6 +233,9 @@ public class TestSceneSetup : MonoBehaviour
     {
         // 创建一个简单的方形Sprite
         Texture2D tex = new Texture2D(64, 64);
+        // 修复: 防止 Unity 因 DontSaveInEditor 标志触发断言错误
+        tex.hideFlags = HideFlags.HideAndDontSave;
+
         Color[] colors = new Color[64 * 64];
         for (int i = 0; i < colors.Length; i++)
         {
@@ -241,7 +244,11 @@ public class TestSceneSetup : MonoBehaviour
         tex.SetPixels(colors);
         tex.Apply();
 
-        return Sprite.Create(tex, new Rect(0, 0, 64, 64), new Vector2(0.5f, 0.5f), 64);
+        Sprite sprite = Sprite.Create(tex, new Rect(0, 0, 64, 64), new Vector2(0.5f, 0.5f), 64);
+        // 同样设置 Sprite 的 hideFlags
+        sprite.hideFlags = HideFlags.HideAndDontSave;
+
+        return sprite;
     }
 
     #endregion
