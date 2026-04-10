@@ -1,11 +1,15 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using OutOfBounds.Core;
+using OutOfBounds.Physics;
 
+namespace OutOfBounds.Player
+{
 /// <summary>
 /// 玩家角色控制器 - 处理移动和跳跃
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D), typeof(Collider2D))]
-public class PlayerController : MonoBehaviour
+public class PlayerController : MonoBehaviour, IPhysicsObject
 {
     [Header("移动设置")]
     [SerializeField] private float moveSpeed = 8f;
@@ -258,4 +262,18 @@ public class PlayerController : MonoBehaviour
     }
 
     #endregion
+
+    #region IPhysicsObject Implementation
+
+    Vector2 IPhysicsObject.Velocity => rb != null ? rb.linearVelocity : Vector2.zero;
+    float IPhysicsObject.Mass => rb != null ? rb.mass : 1f;
+    bool IPhysicsObject.IsKinematic { get => rb != null && rb.isKinematic; set { if (rb != null) rb.isKinematic = value; } }
+
+    void IPhysicsObject.ApplyForce(Vector2 force)
+    {
+        AddForce(force);
+    }
+
+    #endregion
+}
 }

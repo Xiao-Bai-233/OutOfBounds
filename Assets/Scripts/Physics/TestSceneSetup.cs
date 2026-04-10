@@ -1,5 +1,10 @@
 using UnityEngine;
+using OutOfBounds.UI;
+using OutOfBounds.Player;
+using OutOfBounds.DragSystem;
 
+namespace OutOfBounds.Physics
+{
 /// <summary>
 /// 测试场景设置助手
 /// 快速创建测试场景的工具
@@ -215,11 +220,11 @@ public class TestSceneSetup : MonoBehaviour
 
     private void EnsureCamera()
     {
-        var cam = Camera.main;
+        var cam = UnityEngine.Camera.main;
         if (cam == null)
         {
             var camObj = new GameObject("MainCamera");
-            camObj.AddComponent<Camera>();
+            camObj.AddComponent<UnityEngine.Camera>();
             camObj.tag = "MainCamera";
             camObj.transform.position = new Vector3(0, 0, -10);
         }
@@ -273,4 +278,5 @@ public class TestSceneSetup : MonoBehaviour
     }
 
     #endregion
+}
 }

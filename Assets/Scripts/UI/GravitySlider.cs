@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.UI;
+using OutOfBounds.Physics;
 
+namespace OutOfBounds.UI
+{
 /// <summary>
 /// 重力滑块 - 设置菜单中的滑块控制全局重力
 /// </summary>
@@ -125,4 +128,5 @@ public class GravitySlider : MonoBehaviour
     public float NormalizedValue => slider.normalizedValue;
 
     #endregion
+}
 }

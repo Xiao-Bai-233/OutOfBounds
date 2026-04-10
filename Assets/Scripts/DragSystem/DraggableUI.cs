@@ -1,13 +1,244 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using OutOfBounds.Core;
+using OutOfBounds.UI;
+
+namespace OutOfBounds.DragSystem
+{
+    /// <summary>
+    /// 光标类型枚举
+    /// </summary>
+    public enum CursorType
+    {
+        Default,
+        Grab,
+        Grabbing,
+        Pointer,
+        Crosshair
+    }
 
 /// <summary>
 /// 可拖拽的UI组件
 /// 处理鼠标/触摸拖拽交互，支持右键切换固定模式
 /// </summary>
 [RequireComponent(typeof(UIPhysicsElement))]
-public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
+public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler, IInteractable
 {
+    #region 静态光标管理
+
+    private static CursorType currentCursor = CursorType.Default;
+
+    /// <summary>
+    /// 设置全局光标类型
+    /// </summary>
+    public static void SetCursor(CursorType cursor)
+    {
+        if (currentCursor == cursor) return;
+        currentCursor = cursor;
+
+        // 设置对应的系统光标
+        switch (cursor)
+        {
+            case CursorType.Default:
+                Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+                break;
+            case CursorType.Grab:
+                Cursor.SetCursor(CreateGrabCursor(), new Vector2(12, 12), CursorMode.Auto);
+                break;
+            case CursorType.Grabbing:
+                Cursor.SetCursor(CreateGrabbingCursor(), new Vector2(12, 12), CursorMode.Auto);
+                break;
+            case CursorType.Pointer:
+                Cursor.SetCursor(CreatePointerCursor(), new Vector2(0, 0), CursorMode.Auto);
+                break;
+            case CursorType.Crosshair:
+                Cursor.SetCursor(CreateCrosshairCursor(), new Vector2(8, 8), CursorMode.Auto);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 设置自定义光标图片
+    /// </summary>
+    private void SetCustomCursor(Texture2D cursorTexture)
+    {
+        if (cursorTexture != null)
+        {
+            Cursor.SetCursor(cursorTexture, customCursorHotspot, CursorMode.Auto);
+        }
+    }
+
+    /// <summary>
+    /// 恢复默认光标
+    /// </summary>
+    public static void ResetCursor()
+    {
+        currentCursor = CursorType.Default;
+        Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+    }
+
+    /// <summary>
+    /// 创建抓取光标纹理（简单箭头+手的组合）
+    /// </summary>
+    private static Texture2D CreateGrabCursor()
+    {
+        int size = 32;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        var pixels = new Color[size * size];
+
+        // 简单的手形光标
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                // 手掌（白色椭圆）
+                float centerX = size / 2f;
+                float centerY = size / 2f;
+                float dx = (x - centerX) / (size / 4f);
+                float dy = (y - centerY) / (size / 4f);
+                float dist = dx * dx + dy * dy;
+
+                // 手掌
+                if (dist < 1f)
+                {
+                    pixels[y * size + x] = new Color(1f, 1f, 1f, 1f);
+                }
+                // 食指
+                else if (y < size / 2 && x > size / 3 && x < size / 2 && y > size / 4)
+                {
+                    pixels[y * size + x] = new Color(1f, 1f, 1f, 1f);
+                }
+                else
+                {
+                    pixels[y * size + x] = Color.clear;
+                }
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply();
+        return texture;
+    }
+
+    /// <summary>
+    /// 创建抓取中光标纹理
+    /// </summary>
+    private static Texture2D CreateGrabbingCursor()
+    {
+        int size = 32;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        var pixels = new Color[size * size];
+
+        // 闭合的拳头形状
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float centerX = size / 2f;
+                float centerY = size / 2.5f;
+                float dx = (x - centerX) / (size / 4f);
+                float dy = (y - centerY) / (size / 3f);
+                float dist = dx * dx + dy * dy;
+
+                // 拳头（实心椭圆）
+                if (dist < 1f)
+                {
+                    pixels[y * size + x] = new Color(1f, 1f, 1f, 1f);
+                }
+                else
+                {
+                    pixels[y * size + x] = Color.clear;
+                }
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply();
+        return texture;
+    }
+
+    /// <summary>
+    /// 创建指针光标纹理
+    /// </summary>
+    private static Texture2D CreatePointerCursor()
+    {
+        int size = 32;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        var pixels = new Color[size * size];
+
+        // 三角形指针
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                if (y < size / 2 && x > y && x < size - 1 - y)
+                {
+                    pixels[y * size + x] = new Color(1f, 1f, 1f, 1f);
+                }
+                else
+                {
+                    pixels[y * size + x] = Color.clear;
+                }
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply();
+        return texture;
+    }
+
+    /// <summary>
+    /// 创建十字光标纹理
+    /// </summary>
+    private static Texture2D CreateCrosshairCursor()
+    {
+        int size = 32;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        var pixels = new Color[size * size];
+
+        int thickness = 2;
+        int center = size / 2;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                bool isHorizontal = Mathf.Abs(y - center) < thickness;
+                bool isVertical = Mathf.Abs(x - center) < thickness;
+
+                if (isHorizontal || isVertical)
+                {
+                    pixels[y * size + x] = new Color(1f, 1f, 1f, 1f);
+                }
+                else
+                {
+                    pixels[y * size + x] = Color.clear;
+                }
+            }
+        }
+
+        texture.SetPixels(pixels);
+        texture.Apply();
+        return texture;
+    }
+
+    #endregion
+
+    #region IInteractable Implementation
+
+    public bool CanInteract => canBeDragged;
+
+    public void OnInteractStart()
+    {
+        // 交互开始时的处理
+    }
+
+    public void OnInteractEnd()
+    {
+        // 交互结束时的处理
+    }
+
+    #endregion
     [Header("拖拽设置")]
     [SerializeField] private bool canBeDragged = true;
     [SerializeField] private bool highlightOnHover = true;
@@ -28,6 +259,22 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     [SerializeField] private AudioClip dropSound;
     [SerializeField] private AudioClip hoverSound;
 
+    [Header("光标设置")]
+    [Tooltip("悬停时的光标类型")]
+    [SerializeField] private CursorType hoverCursor = CursorType.Grab;
+    [Tooltip("拖拽时的光标类型")]
+    [SerializeField] private CursorType draggingCursor = CursorType.Grabbing;
+    [Tooltip("是否自动切换光标")]
+    [SerializeField] private bool autoSwitchCursor = true;
+
+    [Header("自定义光标图片")]
+    [Tooltip("悬停时的自定义光标图片（优先使用）")]
+    [SerializeField] private Texture2D customHoverCursor;
+    [Tooltip("拖拽时的自定义光标图片（优先使用）")]
+    [SerializeField] private Texture2D customDraggingCursor;
+    [Tooltip("自定义光标的热点（点击位置）")]
+    [SerializeField] private Vector2 customCursorHotspot = new Vector2(12, 12);
+
     // 组件引用
     private UIPhysicsElement physicsElement;
     private Canvas parentCanvas;
@@ -45,6 +292,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     // 目标缩放
     private float targetScale = 1f;
     private float currentScale = 1f;
+    private Vector3 initialScale = Vector3.one;
 
     // 事件
     public System.Action<DraggableUI> OnDragStart;
@@ -59,8 +307,10 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         parentCanvas = GetComponentInParent<Canvas>();
         images = GetComponentsInChildren<UnityEngine.UI.Image>();
 
-        // 存储初始颜色
+        // 存储初始颜色和缩放
         StoreInitialColors();
+        initialScale = physicsElement.RectTransform.localScale;
+        currentScale = 1f;
     }
 
     private void Start()
@@ -176,6 +426,20 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
             SetVisualState(VisualState.Hover);
             PlaySound(hoverSound);
         }
+
+        // 切换光标
+        if (autoSwitchCursor)
+        {
+            // 优先使用自定义图片
+            if (customHoverCursor != null)
+            {
+                SetCustomCursor(customHoverCursor);
+            }
+            else
+            {
+                SetCursor(hoverCursor);
+            }
+        }
     }
 
     public void OnPointerExit(PointerEventData eventData)
@@ -186,6 +450,12 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         if (!isDragging && highlightOnHover)
         {
             SetVisualState(VisualState.Normal);
+        }
+
+        // 恢复默认光标
+        if (autoSwitchCursor)
+        {
+            ResetCursor();
         }
     }
 
@@ -246,6 +516,20 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         PlaySound(pickUpSound);
         SetVisualState(VisualState.Dragging);
         targetScale = draggingScale;
+
+        // 切换到抓取中光标
+        if (autoSwitchCursor)
+        {
+            // 优先使用自定义图片
+            if (customDraggingCursor != null)
+            {
+                SetCustomCursor(customDraggingCursor);
+            }
+            else
+            {
+                SetCursor(draggingCursor);
+            }
+        }
     }
 
     #endregion
@@ -312,11 +596,21 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         {
             SetVisualState(VisualState.Hover);
             targetScale = hoverScale;
+            // 恢复悬停光标
+            if (autoSwitchCursor)
+            {
+                SetCursor(hoverCursor);
+            }
         }
         else
         {
             SetVisualState(VisualState.Normal);
             targetScale = 1f;
+            // 恢复默认光标
+            if (autoSwitchCursor)
+            {
+                ResetCursor();
+            }
         }
     }
 
@@ -359,7 +653,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         if (Mathf.Abs(currentScale - targetScale) > 0.001f)
         {
             currentScale = Mathf.Lerp(currentScale, targetScale, Time.deltaTime * scaleTransitionSpeed);
-            physicsElement.RectTransform.localScale = Vector3.one * currentScale;
+            physicsElement.RectTransform.localScale = initialScale * currentScale;
         }
     }
 
@@ -435,4 +729,5 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     #endif
 
     #endregion
+}
 }

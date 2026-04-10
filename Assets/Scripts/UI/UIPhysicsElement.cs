@@ -1,13 +1,18 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using OutOfBounds.Core;
+using OutOfBounds.Physics;
+using OutOfBounds.Utils;
 
+namespace OutOfBounds.UI
+{
 /// <summary>
 /// UI物理元素基类
 /// 让UI元素拥有刚体属性，可以参与物理碰撞
 /// </summary>
 [RequireComponent(typeof(RectTransform))]
-public class UIPhysicsElement : MonoBehaviour
+public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
 {
     [Header("物理属性")]
     [SerializeField] protected float mass = 1f;
@@ -663,6 +668,19 @@ public class UIPhysicsElement : MonoBehaviour
     }
 
     #endregion
+
+    #region IPhysicsObject Implementation
+
+    Vector2 IPhysicsObject.Velocity => velocity;
+    float IPhysicsObject.Mass => mass;
+    bool IPhysicsObject.IsKinematic { get => isKinematic; set => isKinematic = value; }
+
+    void IPhysicsObject.ApplyForce(Vector2 force)
+    {
+        AddForce(force);
+    }
+
+    #endregion
 }
 
 /// <summary>
@@ -674,4 +692,5 @@ public class Collision2D
     public Transform transform;
     public Vector2 relativeVelocity;
     public ContactFilter2D contactFilter;
+}
 }

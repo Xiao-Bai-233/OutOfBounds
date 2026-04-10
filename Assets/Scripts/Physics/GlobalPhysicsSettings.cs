@@ -1,11 +1,18 @@
 using UnityEngine;
+using OutOfBounds.Core;
+using OutOfBounds.Data;
 
+namespace OutOfBounds.Physics
+{
 /// <summary>
 /// 全局物理设置管理器
 /// 控制游戏中的重力和其他物理参数
 /// </summary>
 public class GlobalPhysicsSettings : MonoBehaviour
 {
+    [Header("数据配置")]
+    [Tooltip("物理设置数据，如未指定则使用默认值")]
+    [SerializeField] private PhysicsSettingsData settingsData;
     public static GlobalPhysicsSettings Instance { get; private set; }
 
     [Header("重力设置")]
@@ -155,4 +162,5 @@ public class GlobalPhysicsSettings : MonoBehaviour
     #endif
 
     #endregion
+}
 }

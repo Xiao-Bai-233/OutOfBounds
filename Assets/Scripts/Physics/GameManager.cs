@@ -1,5 +1,9 @@
 using UnityEngine;
+using OutOfBounds.Core;
+using OutOfBounds.Data;
 
+namespace OutOfBounds.Physics
+{
 /// <summary>
 /// 游戏主管理器 - 管理游戏状态和全局配置
 /// </summary>
@@ -163,4 +167,5 @@ public class GameManager : MonoBehaviour
     public int TotalLevels => totalLevels;
 
     #endregion
+}
 }

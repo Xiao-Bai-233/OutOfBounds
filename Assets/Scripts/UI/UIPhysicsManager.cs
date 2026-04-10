@@ -1,6 +1,10 @@
 using UnityEngine;
 using System.Collections.Generic;
+using OutOfBounds.UI;
+using OutOfBounds.DragSystem;
 
+namespace OutOfBounds.UI
+{
 /// <summary>
 /// UI物理系统管理器
 /// 管理场景中所有的UI物理元素
@@ -282,4 +286,5 @@ public class UIPhysicsManager : MonoBehaviour
     #endif
 
     #endregion
+}
 }
