@@ -15,25 +15,27 @@ namespace OutOfBounds.UI
 public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
 {
     [Header("物理属性")]
-    [SerializeField] protected float mass = 1f;
-    [SerializeField] protected float drag = 1.5f; // 进一步增加阻力
-    [SerializeField] protected float angularDrag = 1f;
-    [SerializeField] protected bool useGravity = true;
-    [SerializeField] protected bool isKinematic;
-    [SerializeField] protected float gravityScale = 0.3f; // 降低重力
+    [SerializeField] public float mass = 1f;
+    [SerializeField] public float drag = 1.5f; // 进一步增加阻力
+    [SerializeField] public float angularDrag = 1f;
+    [SerializeField] public bool useGravity = true;
+    [SerializeField] public bool isKinematic;
+    [SerializeField] public float gravityScale = 0.3f; // 降低重力
+    [SerializeField] public bool isFloating = true; // 是否漂浮（不受重力影响）
     
     [Header("固定模式")]
-    [SerializeField] protected bool isFixed = false; // 是否固定（作为地面/墙壁）
-    [SerializeField] protected Color fixedColor = Color.gray; // 固定时的颜色
-    [SerializeField] protected Color normalColor = Color.white; // 正常颜色
+    [SerializeField] public bool isFixed = false; // 是否固定（作为地面/墙壁）
+    [SerializeField] public Color fixedColor = Color.gray; // 固定时的颜色
+    [SerializeField] public Color normalColor = Color.white; // 正常颜色
     protected Color originalColor;
 
     [Header("碰撞属性")]
-    [SerializeField] protected PhysicsMaterial2D material;
-    [SerializeField] protected float bounciness = 0.2f; // 进一步降低弹性
-    [SerializeField] protected float friction = 0.3f;
-    [SerializeField] protected LayerMask collisionLayers = ~0; // 默认和所有层碰撞
-    [SerializeField] protected float collisionCheckDistance = 0.05f; // 进一步减小检测距离
+    [SerializeField] public PhysicsMaterial2D material;
+    [SerializeField] public float bounciness = 0.2f; // 进一步降低弹性
+    [SerializeField] public float friction = 0.3f;
+    [SerializeField] public LayerMask collisionLayers = ~0; // 默认和所有层碰撞
+    [SerializeField] public float collisionCheckDistance = 0.05f; // 进一步减小检测距离
+    [SerializeField] public bool isPlatform = true; // 是否作为平台（允许玩家站上去）
 
     [Header("边界")]
     [SerializeField] protected bool constrainToParent = true;
@@ -169,9 +171,14 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
 
     protected virtual void ApplyGravity()
     {
-        // 真空环境：不应用重力
-        // 物体只在被抛掷时有速度，然后自然减速停止
-        return;
+        if (useGravity && !isFloating)
+        {
+            // 应用重力
+            float gravity = GlobalPhysicsSettings.Instance != null 
+                ? GlobalPhysicsSettings.Instance.GetUIPhysicsGravity() 
+                : -15f;
+            velocity.y += gravity * Time.fixedDeltaTime;
+        }
     }
 
     protected virtual void ApplyRotation()
@@ -362,10 +369,13 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
         float checkDistance = Mathf.Min(size.magnitude * 0.1f, stepDistance * 1.1f);
         checkDistance = Mathf.Max(checkDistance, 0.01f); // 最小检测距离
 
-        // 只有在运动时才检测
-        if (velocityMag < 0.01f) return;
-
+        // 即使物体静止，也检测碰撞（用于与玩家等场景物体的碰撞）
         Vector2 moveDirection = velocity.normalized;
+        if (velocityMag < 0.01f)
+        {
+            moveDirection = Vector2.down; // 静止时向下检测，用于检测地面
+            checkDistance = 0.1f; // 静止时使用固定检测距离
+        }
 
         // 执行 BoxCast 检测 - 使用 Collider 的实际大小
         RaycastHit2D[] hits = Physics2D.BoxCastAll(
@@ -389,7 +399,8 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
             float velocityAlongNormal = Vector2.Dot(velocity, hit.normal);
 
             // 只处理朝向碰撞面的情况（速度方向与法线相反，即 dot < 0）
-            if (velocityAlongNormal < 0)
+            // 或者物体静止时（用于检测与玩家的碰撞）
+            if (velocityAlongNormal < 0 || velocityMag < 0.01f)
             {
                 // 物理反弹
                 HandleCollisionPhysics(hit);
@@ -648,6 +659,7 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     public bool IsBeingDragged => isBeingDragged;
     public bool IsGroundedElement => IsGrounded();
     public RectTransform RectTransform => rectTransform;
+    public bool IsPlatform => isPlatform;
 
     #endregion
 

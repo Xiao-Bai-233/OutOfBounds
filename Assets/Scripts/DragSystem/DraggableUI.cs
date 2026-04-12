@@ -240,40 +240,59 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
 
     #endregion
     [Header("拖拽设置")]
-    [SerializeField] private bool canBeDragged = true;
-    [SerializeField] private bool highlightOnHover = true;
-    [SerializeField] private float dragSpeed = 15f;
-    [SerializeField] private float releaseVelocityMultiplier = 5f;
+    [SerializeField] public bool canBeDragged = true;
+    [SerializeField] public bool highlightOnHover = true;
+    [SerializeField] public float dragSpeed = 15f;
+    [SerializeField] public float releaseVelocityMultiplier = 5f;
 
     [Header("视觉效果")]
-    [SerializeField] private Color normalColor = Color.white;
-    [SerializeField] private Color hoverColor = Color.yellow;
-    [SerializeField] private Color draggingColor = Color.cyan;
-    [SerializeField] private float hoverScale = 1.05f;
-    [SerializeField] private float draggingScale = 1.1f;
-    [SerializeField] private float scaleTransitionSpeed = 10f;
+    [SerializeField] public Color normalColor = Color.white;
+    [SerializeField] public Color hoverColor = Color.yellow;
+    [SerializeField] public Color draggingColor = Color.cyan;
+    [SerializeField] public float hoverScale = 1.05f;
+    [SerializeField] public float draggingScale = 1.1f;
+    [SerializeField] public float scaleTransitionSpeed = 10f;
 
     [Header("音效")]
-    [SerializeField] private AudioSource audioSource;
-    [SerializeField] private AudioClip pickUpSound;
-    [SerializeField] private AudioClip dropSound;
-    [SerializeField] private AudioClip hoverSound;
+    [SerializeField] public AudioSource audioSource;
+    [SerializeField] public AudioClip pickUpSound;
+    [SerializeField] public AudioClip dropSound;
+    [SerializeField] public AudioClip hoverSound;
 
     [Header("光标设置")]
     [Tooltip("悬停时的光标类型")]
-    [SerializeField] private CursorType hoverCursor = CursorType.Grab;
+    [SerializeField] public CursorType hoverCursor = CursorType.Grab;
     [Tooltip("拖拽时的光标类型")]
-    [SerializeField] private CursorType draggingCursor = CursorType.Grabbing;
+    [SerializeField] public CursorType draggingCursor = CursorType.Grabbing;
     [Tooltip("是否自动切换光标")]
-    [SerializeField] private bool autoSwitchCursor = true;
+    [SerializeField] public bool autoSwitchCursor = true;
 
     [Header("自定义光标图片")]
     [Tooltip("悬停时的自定义光标图片（优先使用）")]
-    [SerializeField] private Texture2D customHoverCursor;
+    [SerializeField] public Texture2D customHoverCursor;
     [Tooltip("拖拽时的自定义光标图片（优先使用）")]
-    [SerializeField] private Texture2D customDraggingCursor;
+    [SerializeField] public Texture2D customDraggingCursor;
     [Tooltip("自定义光标的热点（点击位置）")]
-    [SerializeField] private Vector2 customCursorHotspot = new Vector2(12, 12);
+    [SerializeField] public Vector2 customCursorHotspot = new Vector2(12, 12);
+
+    [Header("R键重置设置")]
+    [Tooltip("按R键是否重置位置")]
+    [SerializeField] public bool enableRKeyReset = true;
+    [Tooltip("R键重置方式")]
+    [SerializeField] public ResetMode resetMode = ResetMode.DefaultPosition;
+    [Tooltip("跟随目标（如玩家），用于 FollowTarget 模式")]
+    [SerializeField] public Transform followTarget;
+    [Tooltip("相对于跟随目标的偏移（FollowTarget 模式下使用，比如头顶上方2格）")]
+    [SerializeField] public Vector3 followOffset = new Vector3(0, 1.5f, 0);
+
+    /// <summary>
+    /// 重置模式枚举
+    /// </summary>
+    public enum ResetMode
+    {
+        DefaultPosition,  // 回到初始位置
+        FollowTarget      // 跟随目标的位置+偏移
+    }
 
     // 组件引用
     private UIPhysicsElement physicsElement;
@@ -294,6 +313,10 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     private float currentScale = 1f;
     private Vector3 initialScale = Vector3.one;
 
+    // R键重置相关
+    private Vector3 initialWorldPosition;
+    private Vector2? initialAnchoredPosition;
+
     // 事件
     public System.Action<DraggableUI> OnDragStart;
     public System.Action<DraggableUI> OnDragEnd;
@@ -309,14 +332,40 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
 
         // 存储初始颜色和缩放
         StoreInitialColors();
-        initialScale = physicsElement.RectTransform.localScale;
-        currentScale = 1f;
+        
+        // 检查physicsElement是否为null
+        if (physicsElement != null && physicsElement.RectTransform != null)
+        {
+            initialScale = physicsElement.RectTransform.localScale;
+            currentScale = 1f;
+
+            // 记录初始位置
+            if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
+            {
+                initialWorldPosition = physicsElement.RectTransform.position;
+            }
+            else
+            {
+                initialAnchoredPosition = physicsElement.RectTransform.anchoredPosition;
+                initialWorldPosition = physicsElement.RectTransform.position;
+            }
+        }
+        else
+        {
+            // 如果没有UIPhysicsElement组件，使用默认值
+            initialScale = transform.localScale;
+            currentScale = 1f;
+            initialWorldPosition = transform.position;
+        }
     }
 
     private void Start()
     {
         // 订阅物理元素事件
-        physicsElement.OnBecameGrounded += HandleLanded;
+        if (physicsElement != null)
+        {
+            physicsElement.OnBecameGrounded += HandleLanded;
+        }
     }
 
     private void Update()
@@ -324,8 +373,14 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         // 平滑缩放过渡
         UpdateScale();
 
+        // R键重置位置
+        if (enableRKeyReset && Input.GetKeyDown(KeyCode.R))
+        {
+            ResetPosition();
+        }
+
         // 计算释放速度
-        if (isDragging)
+        if (isDragging && physicsElement != null && physicsElement.RectTransform != null)
         {
             // 每帧都记录位置，用于计算速度
             Vector2 currentPos;
@@ -382,7 +437,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     /// </summary>
     public void StartDragExternally()
     {
-        if (!canBeDragged) return;
+        if (!canBeDragged || physicsElement == null || physicsElement.RectTransform == null) return;
 
         Vector2 mousePos = GetWorldMousePosition();
         dragOffset = physicsElement.RectTransform.position - (Vector3)mousePos;
@@ -390,25 +445,126 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         isDragging = true;
         releaseVelocity = Vector2.zero;
 
+        // 开始拖拽时取消漂浮，开始受重力影响
+        physicsElement.isFloating = false;
+
         OnDragStart?.Invoke(this);
         PlaySound(pickUpSound);
         SetVisualState(VisualState.Dragging);
     }
 
-    /// <summary>
-    /// 强制结束拖拽
-    /// </summary>
-    public void EndDragExternally()
-    {
-        if (!isDragging) return;
+/// <summary>
+        /// 强制结束拖拽
+        /// </summary>
+        public void EndDragExternally()
+        {
+            if (!isDragging || physicsElement == null) return;
 
-        physicsElement.EndDrag(releaseVelocity * releaseVelocityMultiplier);
-        isDragging = false;
+            physicsElement.EndDrag(releaseVelocity * releaseVelocityMultiplier);
+            isDragging = false;
 
-        OnDragEnd?.Invoke(this);
-        PlaySound(dropSound);
-        SetVisualState(VisualState.Normal);
-    }
+            OnDragEnd?.Invoke(this);
+            PlaySound(dropSound);
+            SetVisualState(VisualState.Normal);
+        }
+
+        /// <summary>
+        /// R键重置位置（公共方法，也可外部调用）
+        /// </summary>
+        public void ResetPosition()
+        {
+            // 先结束拖拽状态
+            if (isDragging)
+            {
+                isDragging = false;
+                releaseVelocity = Vector2.zero;
+            }
+
+            // 停止物理运动（归零速度）
+            if (physicsElement != null && physicsElement.RectTransform != null)
+            {
+                physicsElement.SetVelocity(Vector2.zero);
+
+                switch (resetMode)
+                {
+                    case ResetMode.DefaultPosition:
+                        // 回到初始位置
+                        if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
+                        {
+                            physicsElement.RectTransform.position = initialWorldPosition;
+                        }
+                        else if (initialAnchoredPosition.HasValue)
+                        {
+                            physicsElement.RectTransform.anchoredPosition = initialAnchoredPosition.Value;
+                        }
+                        break;
+
+                    case ResetMode.FollowTarget:
+                        // 跟随目标的位置+偏移
+                        if (followTarget != null)
+                        {
+                            Vector3 targetPos = followTarget.transform.position + followOffset;
+
+                            if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
+                            {
+                                physicsElement.RectTransform.position = targetPos;
+                            }
+                            else
+                            {
+                                // Screen Space 模式：转换世界坐标到锚点坐标
+                                Vector2 anchoredPos = WorldToAnchored(targetPos);
+                                physicsElement.RectTransform.anchoredPosition = anchoredPos;
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[DraggableUI] FollowTarget 模式但未设置跟随目标，回退到默认位置");
+                            if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
+                            {
+                                physicsElement.RectTransform.position = initialWorldPosition;
+                            }
+                            else if (initialAnchoredPosition.HasValue)
+                            {
+                                physicsElement.RectTransform.anchoredPosition = initialAnchoredPosition.Value;
+                            }
+                        }
+                        break;
+                }
+
+                // 重置视觉状态
+                SetVisualState(VisualState.Normal);
+                targetScale = 1f;
+                currentScale = 1f;
+                physicsElement.RectTransform.localScale = initialScale;
+
+                Debug.Log($"[DraggableUI] R键重置位置完成，模式: {resetMode}");
+            }
+            else
+            {
+                // 如果没有physicsElement，使用transform
+                switch (resetMode)
+                {
+                    case ResetMode.DefaultPosition:
+                        transform.position = initialWorldPosition;
+                        break;
+                    case ResetMode.FollowTarget:
+                        if (followTarget != null)
+                        {
+                            transform.position = followTarget.transform.position + followOffset;
+                        }
+                        else
+                        {
+                            transform.position = initialWorldPosition;
+                        }
+                        break;
+                }
+                // 重置视觉状态
+                SetVisualState(VisualState.Normal);
+                targetScale = 1f;
+                currentScale = 1f;
+                transform.localScale = initialScale;
+            }
+        }
 
     #endregion
 
@@ -462,7 +618,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     public void OnPointerClick(PointerEventData eventData)
     {
         // 右键点击切换固定模式
-        if (eventData.button == PointerEventData.InputButton.Right)
+        if (eventData.button == PointerEventData.InputButton.Right && physicsElement != null)
         {
             physicsElement.ToggleFixed();
             
@@ -477,6 +633,9 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        // 检查physicsElement是否存在
+        if (physicsElement == null || physicsElement.RectTransform == null) return;
+        
         // 固定模式下不能拖拽
         if (physicsElement.IsFixed) return;
         
@@ -495,6 +654,9 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         isDragging = true;
         releaseVelocity = Vector2.zero;
         
+        // 开始拖拽时取消漂浮，开始受重力影响
+        physicsElement.isFloating = false;
+
         // World Space 模式下使用 position 而不是 anchoredPosition
         if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
         {
@@ -538,7 +700,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
 
     public void OnDrag(PointerEventData eventData)
     {
-        if (!isDragging) return;
+        if (!isDragging || physicsElement == null || physicsElement.RectTransform == null) return;
 
         // 获取鼠标世界坐标
         Vector2 mousePos = GetWorldMousePosition();
@@ -567,7 +729,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
 
     public void OnEndDrag(PointerEventData eventData)
     {
-        if (!isDragging) return;
+        if (!isDragging || physicsElement == null) return;
 
         // 结束拖拽，应用释放速度
         // World Space 模式下速度单位不同，需要调整
@@ -638,6 +800,8 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
 
     private Vector2 ScreenToAnchoredPosition(Vector2 screenPos)
     {
+        if (physicsElement == null || physicsElement.RectTransform == null) return screenPos;
+        
         Vector2 localPoint;
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
             physicsElement.RectTransform.parent as RectTransform,
@@ -653,7 +817,14 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         if (Mathf.Abs(currentScale - targetScale) > 0.001f)
         {
             currentScale = Mathf.Lerp(currentScale, targetScale, Time.deltaTime * scaleTransitionSpeed);
-            physicsElement.RectTransform.localScale = initialScale * currentScale;
+            if (physicsElement != null && physicsElement.RectTransform != null)
+            {
+                physicsElement.RectTransform.localScale = initialScale * currentScale;
+            }
+            else
+            {
+                transform.localScale = initialScale * currentScale;
+            }
         }
     }
 
@@ -697,6 +868,31 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
             audioSource.Stop();
         }
         audioSource.PlayOneShot(clip);
+    }
+
+    private Vector2 WorldToAnchored(Vector3 worldPos)
+    {
+        if (physicsElement == null || physicsElement.RectTransform == null) return worldPos;
+        
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            physicsElement.RectTransform.parent as RectTransform,
+            RectTransformUtility.WorldToScreenPoint(parentCanvas.worldCamera, worldPos),
+            parentCanvas?.worldCamera,
+            out Vector2 localPoint
+        );
+        return localPoint;
+    }
+
+    /// <summary>
+    /// 设置跟随目标（运行时动态切换）
+    /// </summary>
+    public void SetFollowTarget(Transform target, Vector3? offset = null)
+    {
+        followTarget = target;
+        if (offset.HasValue)
+        {
+            followOffset = offset.Value;
+        }
     }
 
     #endregion

@@ -56,6 +56,9 @@ public class UIPhysicsManager : MonoBehaviour
             }
             elementsToRemove.Clear();
         }
+        
+        // 检查碰撞
+        CheckCollisions();
     }
 
     #endregion
@@ -162,7 +165,7 @@ public class UIPhysicsManager : MonoBehaviour
 
         // 计算冲量
         float impulse = -(1 + restitution) * velocityAlongNormal;
-        impulse /= (1 / a.GetVelocity().magnitude) + (1 / b.GetVelocity().magnitude);
+        impulse /= (1 / a.mass) + (1 / b.mass);
 
         // 应用冲量
         a.AddForce(-impulse * direction);
@@ -176,22 +179,26 @@ public class UIPhysicsManager : MonoBehaviour
     /// <summary>
     /// 生成心形物理元素（用于血条搭桥机制）
     /// </summary>
-    public UIPhysicsElement SpawnHeartElement(Vector2 position, Transform parent = null)
+    public UIPhysicsElement SpawnHeartElement(Vector2 position, float size = 50f, Transform parent = null)
     {
         // 创建一个心形UI元素
-        GameObject heartObj = CreateHeartUI();
+        GameObject heartObj = CreateHeartUI(size);
         heartObj.transform.SetParent(parent ?? transform);
         heartObj.transform.position = position;
 
         var physicsElement = heartObj.AddComponent<UIPhysicsElement>();
         physicsElement.SetUseGravity(true);
 
+        // 添加碰撞器组件，使心形元素可以碰撞
+        var collider = heartObj.AddComponent<BoxCollider2D>();
+        collider.size = new Vector2(size, size);
+
         RegisterElement(physicsElement);
 
         return physicsElement;
     }
 
-    private GameObject CreateHeartUI()
+    private GameObject CreateHeartUI(float size = 50f)
     {
         // 创建心形Image
         var go = new GameObject("HeartElement");
@@ -202,7 +209,7 @@ public class UIPhysicsManager : MonoBehaviour
         image.color = Color.red;
 
         RectTransform rect = go.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(50, 50);
+        rect.sizeDelta = new Vector2(size, size);
 
         return go;
     }

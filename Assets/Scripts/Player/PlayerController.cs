@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using OutOfBounds.Core;
 using OutOfBounds.Physics;
+using OutOfBounds.UI;
 
 namespace OutOfBounds.Player
 {
@@ -56,6 +57,16 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
         SetupInputActions();
+    }
+
+    private void Start()
+    {
+        // 确保HealthBarManager存在并初始化
+        if (HealthBarManager.Instance != null)
+        {
+            // 使用HealthBarManager组件中设置的maxHealth
+            HealthBarManager.Instance.InitializeHealthBar(HealthBarManager.Instance.maxHealth);
+        }
     }
 
     private void Update()
@@ -216,8 +227,25 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
         Vector2 checkPosition = (Vector2)transform.position + groundCheckOffset;
         float checkRadius = col.bounds.extents.x;
 
+        // 检测地面层
         Collider2D hit = Physics2D.OverlapCircle(checkPosition, checkRadius + groundCheckDistance, groundLayer);
-        return hit != null;
+        if (hit != null)
+        {
+            return true;
+        }
+
+        // 检测心形元素（作为平台）
+        Collider2D[] hits = Physics2D.OverlapCircleAll(checkPosition, checkRadius + groundCheckDistance);
+        foreach (Collider2D collider in hits)
+        {
+            UIPhysicsElement uiElement = collider.GetComponent<UIPhysicsElement>();
+            if (uiElement != null && uiElement.IsPlatform)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     #endregion
@@ -227,6 +255,8 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
     // 事件
     public System.Action OnJump;
     public System.Action OnLand;
+    public System.Action OnTakeDamage;
+    public System.Action OnDeath;
 
     // 公共属性
     public bool IsGroundedState => IsGrounded();
@@ -244,6 +274,33 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
     public void AddForce(Vector2 force, ForceMode2D mode = ForceMode2D.Impulse)
     {
         rb.AddForce(force, mode);
+    }
+
+    // 受伤处理
+    public void TakeDamage(int damage)
+    {
+        if (HealthBarManager.Instance != null)
+        {
+            HealthBarManager.Instance.TakeDamage(damage);
+            OnTakeDamage?.Invoke();
+        }
+    }
+
+    // 死亡处理
+    public void Die()
+    {
+        OnDeath?.Invoke();
+        // 可以在这里添加死亡动画、游戏结束逻辑等
+        Debug.Log("玩家死亡");
+    }
+
+    // 治疗
+    public void Heal(int amount)
+    {
+        if (HealthBarManager.Instance != null)
+        {
+            HealthBarManager.Instance.Heal(amount);
+        }
     }
 
     #endregion
