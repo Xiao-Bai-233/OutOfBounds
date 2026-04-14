@@ -28,6 +28,15 @@ namespace OutOfBounds.UI
             }
         }
 
+        private void Start()
+        {
+            if (taskWindow != null)
+            {
+                // 确保在游戏开始时强制隐藏，并同步状态
+                taskWindow.SetActive(false);
+            }
+        }
+
         private void Update()
         {
             // 处理窗口显示/隐藏
@@ -35,9 +44,9 @@ namespace OutOfBounds.UI
             {
                 if (taskWindow != null)
                 {
-                    Debug.Log("TaskWindowManager: Tab键被按下，当前窗口状态: " + taskWindow.activeSelf);
-                    taskWindow.SetActive(!taskWindow.activeSelf);
-                    Debug.Log("TaskWindowManager: Tab键处理后，窗口状态: " + taskWindow.activeSelf);
+                    bool nextState = !taskWindow.activeSelf;
+                    taskWindow.SetActive(nextState);
+                    Debug.Log($"TaskWindowManager: Tab键按下，窗口状态切换为: {nextState}");
                 }
             }
         }

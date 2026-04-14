@@ -24,6 +24,11 @@ public class UIPhysicsManager : MonoBehaviour
     // 当前被拖拽的元素
     private DraggableUI currentDraggingElement;
 
+    // 对象池
+    private Stack<UIPhysicsElement> heartPool = new Stack<UIPhysicsElement>();
+    private Stack<DialogBubbleElement> bubblePool = new Stack<DialogBubbleElement>();
+    private GameObject poolContainer;
+
     #region Unity 生命周期
 
     private void Awake()
@@ -35,6 +40,11 @@ public class UIPhysicsManager : MonoBehaviour
             return;
         }
         Instance = this;
+
+        // 创建对象池容器
+        poolContainer = new GameObject("PhysicsObjectPool");
+        poolContainer.transform.SetParent(transform);
+        poolContainer.SetActive(false);
     }
 
     private void Start()
@@ -149,19 +159,49 @@ public class UIPhysicsManager : MonoBehaviour
 
     private void ResolveCollision(UIPhysicsElement a, UIPhysicsElement b)
     {
-        // 简化的碰撞响应
-        Vector2 direction = a.RectTransform.position - b.RectTransform.position;
-        direction.Normalize();
+        // 1. 位置修正 (Depenetration) - 防止重叠导致的抽搐
+        Rect rectA = GetWorldRect(a.RectTransform);
+        Rect rectB = GetWorldRect(b.RectTransform);
+        
+        // 计算重叠区域
+        float overlapX = Mathf.Min(rectA.xMax, rectB.xMax) - Mathf.Max(rectA.xMin, rectB.xMin);
+        float overlapY = Mathf.Min(rectA.yMax, rectB.yMax) - Mathf.Max(rectA.yMin, rectB.yMin);
+        
+        // 如果重叠极小，不进行修正，防止微小颤动
+        if (overlapX < 0.01f && overlapY < 0.01f) return;
 
-        // 计算相对速度
+        Vector2 separation = Vector2.zero;
+        Vector2 direction = a.RectTransform.position - b.RectTransform.position;
+        
+        // 沿着重叠较小的轴进行分离
+        if (overlapX < overlapY)
+        {
+            separation.x = overlapX * (direction.x > 0 ? 0.5f : -0.5f);
+        }
+        else
+        {
+            separation.y = overlapY * (direction.y > 0 ? 0.5f : -0.5f);
+        }
+        
+        // 应用位置修正 (平分到两个物体上)
+        // 稍微降低修正力度，增加稳定性
+        float relaxation = 0.8f; 
+        if (!a.IsBeingDragged && !a.isKinematic) a.RectTransform.position += (Vector3)(separation * relaxation);
+        if (!b.IsBeingDragged && !b.isKinematic) b.RectTransform.position -= (Vector3)(separation * relaxation);
+
+        // 2. 物理冲量响应
+        direction.Normalize();
         Vector2 relativeVelocity = a.GetVelocity() - b.GetVelocity();
         float velocityAlongNormal = Vector2.Dot(relativeVelocity, direction);
 
-        // 如果物体正在分离，不处理
+        // 如果物体正在分离，不处理速度响应
         if (velocityAlongNormal > 0) return;
 
+        // 稳定性处理：如果相对速度极小，不再进行冲量计算
+        if (Mathf.Abs(velocityAlongNormal) < 0.1f) return;
+
         // 计算弹性系数
-        float restitution = 0.5f;
+        float restitution = Mathf.Min(a.bounciness, b.bounciness);
 
         // 计算冲量
         float impulse = -(1 + restitution) * velocityAlongNormal;
@@ -177,36 +217,97 @@ public class UIPhysicsManager : MonoBehaviour
     #region 特殊元素生成
 
     /// <summary>
-    /// 生成心形物理元素（用于血条搭桥机制）
+    /// 生成心形物理元素（支持对象池）
     /// </summary>
-    public UIPhysicsElement SpawnHeartElement(Vector2 position, float size = 50f, Transform parent = null)
+    public UIPhysicsElement SpawnHeartElement(Vector2 position, float size = 50f, Transform parent = null, Sprite sprite = null)
     {
-        // 创建一个心形UI元素
-        GameObject heartObj = CreateHeartUI(size);
-        heartObj.transform.SetParent(parent ?? transform);
-        heartObj.transform.position = position;
+        UIPhysicsElement heartElement = null;
 
-        var physicsElement = heartObj.AddComponent<UIPhysicsElement>();
-        physicsElement.SetUseGravity(true);
+        // 尝试从对象池获取
+        if (heartPool.Count > 0)
+        {
+            heartElement = heartPool.Pop();
+            heartElement.gameObject.SetActive(true);
+            heartElement.transform.SetParent(parent ?? transform);
+            heartElement.transform.position = position;
+            
+            // 更新尺寸
+            RectTransform rect = heartElement.GetComponent<RectTransform>();
+            if (rect != null) rect.sizeDelta = new Vector2(size, size);
 
-        // 添加碰撞器组件，使心形元素可以碰撞
-        var collider = heartObj.AddComponent<BoxCollider2D>();
-        collider.size = new Vector2(size, size);
+            // 更新碰撞体尺寸
+            BoxCollider2D collider = heartElement.GetComponent<BoxCollider2D>();
+            if (collider != null) collider.size = new Vector2(size, size);
+            
+            // 更新 Image
+            var image = heartElement.GetComponent<UnityEngine.UI.Image>();
+            if (image != null)
+            {
+                image.sprite = sprite;
+                image.color = sprite != null ? Color.white : Color.red;
+            }
 
-        RegisterElement(physicsElement);
+            // 重置物理状态
+            heartElement.ResetPhysics();
+        }
+        else
+        {
+            // 池中没有，则创建新对象
+            GameObject heartObj = CreateHeartUI(size, sprite);
+            heartObj.transform.SetParent(parent ?? transform);
+            heartObj.transform.position = position;
 
-        return physicsElement;
+            heartElement = heartObj.AddComponent<UIPhysicsElement>();
+            heartElement.SetUseGravity(true);
+
+            // 添加碰撞器
+            var collider = heartObj.AddComponent<BoxCollider2D>();
+            collider.size = new Vector2(size, size);
+        }
+
+        RegisterElement(heartElement);
+        return heartElement;
     }
 
-    private GameObject CreateHeartUI(float size = 50f)
+    /// <summary>
+    /// 回收心形物理元素到对象池
+    /// </summary>
+    public void RecycleHeartElement(UIPhysicsElement element)
+    {
+        if (element == null) return;
+
+        UnregisterElement(element);
+        
+        // 如果是心形元素（通过名称或组件判断，这里简单通过名称）
+        if (element.name.StartsWith("HeartElement"))
+        {
+            element.gameObject.SetActive(false);
+            element.transform.SetParent(poolContainer.transform);
+            heartPool.Push(element);
+        }
+        else
+        {
+            Destroy(element.gameObject);
+        }
+    }
+
+    private GameObject CreateHeartUI(float size = 50f, Sprite sprite = null)
     {
         // 创建心形Image
         var go = new GameObject("HeartElement");
         var image = go.AddComponent<UnityEngine.UI.Image>();
 
-        // TODO: 需要美术提供心形Sprite
-        // 暂时使用圆形代替
-        image.color = Color.red;
+        if (sprite != null)
+        {
+            image.sprite = sprite;
+            image.color = Color.white;
+        }
+        else
+        {
+            // TODO: 需要美术提供心形Sprite
+            // 暂时使用圆形代替
+            image.color = Color.red;
+        }
 
         RectTransform rect = go.GetComponent<RectTransform>();
         rect.sizeDelta = new Vector2(size, size);
@@ -215,26 +316,44 @@ public class UIPhysicsManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 生成一个通用的可拖拽UI物理元素
+    /// 生成对话气泡（支持对象池）
     /// </summary>
-    public DraggableUI SpawnDraggableElement(Vector2 position, Vector2 size, Color color, Transform parent = null)
+    public DialogBubbleElement SpawnBubbleElement(GameObject prefab, Vector2 position, string text, Transform parent = null)
     {
-        var go = new GameObject("DraggableUIElement");
-        go.transform.SetParent(parent ?? transform);
+        DialogBubbleElement bubble = null;
 
-        RectTransform rect = go.AddComponent<RectTransform>();
-        rect.sizeDelta = size;
-        rect.position = position;
+        if (bubblePool.Count > 0)
+        {
+            bubble = bubblePool.Pop();
+            bubble.gameObject.SetActive(true);
+            bubble.transform.SetParent(parent ?? transform);
+            bubble.transform.position = position;
+            bubble.ResetPhysics();
+        }
+        else
+        {
+            GameObject go = Instantiate(prefab, parent ?? transform);
+            go.transform.position = position;
+            bubble = go.GetComponent<DialogBubbleElement>();
+            if (bubble == null) bubble = go.AddComponent<DialogBubbleElement>();
+        }
 
-        var image = go.AddComponent<UnityEngine.UI.Image>();
-        image.color = color;
+        bubble.SetText(text);
+        RegisterElement(bubble);
+        return bubble;
+    }
 
-        var physicsElement = go.AddComponent<UIPhysicsElement>();
-        var draggable = go.AddComponent<DraggableUI>();
+    /// <summary>
+    /// 回收对话气泡到对象池
+    /// </summary>
+    public void RecycleBubbleElement(DialogBubbleElement element)
+    {
+        if (element == null) return;
 
-        RegisterElement(physicsElement);
-
-        return draggable;
+        UnregisterElement(element);
+        element.gameObject.SetActive(false);
+        element.transform.SetParent(poolContainer.transform);
+        bubblePool.Push(element);
     }
 
     #endregion

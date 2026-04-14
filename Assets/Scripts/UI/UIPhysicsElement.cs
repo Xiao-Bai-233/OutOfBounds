@@ -76,7 +76,10 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
         {
             originalColor = images[0].color;
         }
+    }
 
+    protected virtual void OnEnable()
+    {
         // 监听全局物理设置变化
         if (GlobalPhysicsSettings.Instance != null)
         {
@@ -84,9 +87,40 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
         }
     }
 
+    protected virtual void OnDisable()
+    {
+        if (GlobalPhysicsSettings.Instance != null)
+        {
+            GlobalPhysicsSettings.Instance.OnGravityChanged -= OnGlobalGravityChanged;
+        }
+    }
+
     protected virtual void Start()
     {
         lastPosition = rectTransform.anchoredPosition;
+    }
+
+    /// <summary>
+    /// 重置物理状态，用于对象池重用
+    /// </summary>
+    public virtual void ResetPhysics()
+    {
+        velocity = Vector2.zero;
+        angularVelocity = 0f;
+        rotation = 0f;
+        isBeingDragged = false;
+        wasGrounded = false;
+        isFixed = false;
+        
+        if (rectTransform != null)
+        {
+            rectTransform.rotation = Quaternion.identity;
+        }
+
+        if (images != null && images.Length > 0)
+        {
+            images[0].color = originalColor;
+        }
     }
 
     protected virtual void Update()
@@ -143,16 +177,21 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     {
         if (isBeingDragged || isKinematic) return;
 
-        // 应用重力（只在有速度时或速度阈值以上）
+        // 应用重力
         ApplyGravity();
 
         // 应用阻力
         ApplyDrag();
         
-        // 速度很小时完全停止，避免持续微小移动
-        if (velocity.magnitude < 0.05f && Mathf.Abs(angularVelocity) < 1f)
+        // 稳定性处理：速度和角速度很小时完全停止
+        // 增加阈值，防止微小颤动
+        if (velocity.magnitude < 0.15f)
         {
             velocity = Vector2.zero;
+        }
+        
+        if (Mathf.Abs(angularVelocity) < 2f)
+        {
             angularVelocity = 0f;
         }
     }
@@ -173,11 +212,19 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     {
         if (useGravity && !isFloating)
         {
+            // 如果已经在地面上且速度很小，停止累积重力速度
+            if (IsGrounded() && velocity.y <= 0.01f)
+            {
+                // 维持一个微小的向下速度以保持着地状态，但不累积
+                velocity.y = Mathf.Max(velocity.y, -0.1f);
+                return;
+            }
+
             // 应用重力
             float gravity = GlobalPhysicsSettings.Instance != null 
                 ? GlobalPhysicsSettings.Instance.GetUIPhysicsGravity() 
                 : -15f;
-            velocity.y += gravity * Time.fixedDeltaTime;
+            velocity.y += gravity * gravityScale * Time.fixedDeltaTime;
         }
     }
 
@@ -417,36 +464,49 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     /// </summary>
     protected virtual void HandleCollisionPhysics(RaycastHit2D hit)
     {
-        // 1. 速度反弹
-        Vector2 reflection = Vector2.Reflect(velocity, hit.normal);
-        velocity = reflection * bounciness;
+        // 1. 位置修正 (Depenetration) - 防止物体嵌入导致抽搐
+        // 只有在嵌入较深时才强制推开，否则微调
+        float penetration = 0.05f - hit.distance;
+        if (penetration > 0)
+        {
+            // 使用更平滑的推开力度
+            Vector2 pushBack = hit.normal * (penetration * 0.5f);
+            
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas != null && canvas.renderMode == RenderMode.WorldSpace)
+            {
+                rectTransform.position += (Vector3)pushBack;
+            }
+            else
+            {
+                rectTransform.anchoredPosition += ScreenToAnchoredOffset(pushBack);
+            }
+        }
 
-        // 2. 添加旋转（基于碰撞角度和速度）
-        // 切向速度会产生旋转
+        // 2. 速度反弹
+        float velocityAlongNormal = Vector2.Dot(velocity, hit.normal);
+        if (velocityAlongNormal < 0)
+        {
+            // 稳定性处理：如果碰撞速度极小，不再反弹，直接抹平分量
+            if (Mathf.Abs(velocityAlongNormal) < 0.2f)
+            {
+                velocity -= hit.normal * velocityAlongNormal;
+            }
+            else
+            {
+                Vector2 reflection = Vector2.Reflect(velocity, hit.normal);
+                velocity = reflection * bounciness;
+                
+                // 应用摩擦力
+                velocity *= (1f - friction * 0.2f);
+            }
+        }
+
+        // 3. 添加旋转
         Vector2 tangent = new Vector2(-hit.normal.y, hit.normal.x);
         float tangentVelocity = Vector2.Dot(velocity, tangent);
-        angularVelocity += tangentVelocity * 2f / mass; // 速度越快，转得越快
-
-        // 3. 限制最大旋转速度
+        angularVelocity += tangentVelocity * 2f / mass; 
         angularVelocity = Mathf.Clamp(angularVelocity, -360f, 360f);
-
-        // 4. 应用摩擦力
-        velocity *= (1f - friction * 0.2f);
-
-        // 5. 防止穿透：沿着法线方向推开
-        float penetration = 0.02f; // 减小推开距离
-        Vector2 pushBack = hit.normal * penetration;
-        
-        // World Space 模式下直接修改 position
-        Canvas canvas = GetComponentInParent<Canvas>();
-        if (canvas != null && canvas.renderMode == RenderMode.WorldSpace)
-        {
-            rectTransform.position += (Vector3)pushBack;
-        }
-        else
-        {
-            rectTransform.anchoredPosition += ScreenToAnchoredOffset(pushBack);
-        }
     }
 
     /// <summary>

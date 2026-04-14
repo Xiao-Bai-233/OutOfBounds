@@ -64,7 +64,12 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     {
         if (cursorTexture != null)
         {
+            // 确保纹理的可读性设置正确，并且热点位置合理
             Cursor.SetCursor(cursorTexture, customCursorHotspot, CursorMode.Auto);
+        }
+        else
+        {
+            ResetCursor();
         }
     }
 
@@ -304,6 +309,7 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
     private bool isDragging;
     private Vector2 dragOffset;
     private Vector2 lastPosition;
+    private Vector2 lastMousePosition;
     private Vector2 releaseVelocity;
     private float velocityUpdateInterval = 0.02f;
     private float lastVelocityUpdate;
@@ -382,33 +388,24 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         // 计算释放速度
         if (isDragging && physicsElement != null && physicsElement.RectTransform != null)
         {
-            // 每帧都记录位置，用于计算速度
-            Vector2 currentPos;
+            // 使用鼠标位移来计算速度，而不是 RectTransform 的位置
+            // 这样可以避免 RectTransform 因为物理修正产生的瞬间位移导致速度激增
+            Vector2 currentMousePos = GetWorldMousePosition();
             
-            // World Space 模式下使用 position
-            if (parentCanvas != null && parentCanvas.renderMode == RenderMode.WorldSpace)
-            {
-                currentPos = physicsElement.RectTransform.position;
-            }
-            else
-            {
-                currentPos = physicsElement.RectTransform.anchoredPosition;
-            }
-            
-            // 计算瞬时速度
-            Vector2 frameVelocity = (currentPos - lastPosition) / Time.deltaTime;
+            // 计算鼠标瞬时速度 (世界单位/秒)
+            Vector2 mouseFrameVelocity = (currentMousePos - lastMousePosition) / Time.deltaTime;
             
             // 限制最大速度，防止飞出去
-            float maxSpeed = 10f; // 最大速度限制
-            if (frameVelocity.magnitude > maxSpeed)
+            float maxSpeed = 15f; 
+            if (mouseFrameVelocity.magnitude > maxSpeed)
             {
-                frameVelocity = frameVelocity.normalized * maxSpeed;
+                mouseFrameVelocity = mouseFrameVelocity.normalized * maxSpeed;
             }
             
             // 平滑速度变化
-            releaseVelocity = Vector2.Lerp(releaseVelocity, frameVelocity, 0.2f);
+            releaseVelocity = Vector2.Lerp(releaseVelocity, mouseFrameVelocity, 0.15f);
             
-            lastPosition = currentPos;
+            lastMousePosition = currentMousePos;
         }
     }
 
@@ -758,10 +755,17 @@ public class DraggableUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         {
             SetVisualState(VisualState.Hover);
             targetScale = hoverScale;
-            // 恢复悬停光标
+            // 恢复悬停光标（考虑自定义图片）
             if (autoSwitchCursor)
             {
-                SetCursor(hoverCursor);
+                if (customHoverCursor != null)
+                {
+                    SetCustomCursor(customHoverCursor);
+                }
+                else
+                {
+                    SetCursor(hoverCursor);
+                }
             }
         }
         else

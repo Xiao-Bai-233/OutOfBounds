@@ -27,17 +27,11 @@ namespace OutOfBounds.UI
             Debug.Log("TaskWindow Awake: 初始化任务窗口");
             // 初始时隐藏窗口
             gameObject.SetActive(false);
-            Debug.Log("TaskWindow Awake: 窗口初始状态: " + gameObject.activeSelf);
-
-            // 设置任务文本
+            
+            // 如果不需要显示任务文字，这里可以跳过引用检查
             if (taskText != null)
             {
                 UpdateTaskText();
-                Debug.Log("TaskWindow Awake: 任务文本设置完成");
-            }
-            else
-            {
-                Debug.LogError("TaskWindow Awake: taskText is null");
             }
         }
 
@@ -80,6 +74,14 @@ namespace OutOfBounds.UI
         #endregion
 
         #region 任务管理
+
+        /// <summary>
+        /// 关闭窗口（供按钮调用）
+        /// </summary>
+        public void CloseWindow()
+        {
+            gameObject.SetActive(false);
+        }
 
         /// <summary>
         /// 更新任务文本

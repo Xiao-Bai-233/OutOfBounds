@@ -130,6 +130,7 @@ namespace OutOfBounds.Physics
             {
                 spriteRenderer.color = isActive ? activeColor : inactiveColor;
             }
+            // 如果是 Tilemap 模式，spriteRenderer 为空，这里不执行任何操作，不报错
         }
 
         #endregion

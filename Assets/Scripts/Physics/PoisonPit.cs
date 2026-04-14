@@ -42,37 +42,25 @@ namespace OutOfBounds.Physics
             // 检测玩家进入
             if (collision.CompareTag("Player"))
             {
-                // 检查是否在伤害冷却期内
-                if (Time.time - lastDamageTime >= damageCooldown)
+                // 玩家进入毒水坑不再扣血，而是传送
+                PlayerController player = collision.GetComponent<PlayerController>();
+                if (player != null)
                 {
-                    // 玩家进入毒水坑扣血
-                    PlayerController player = collision.GetComponent<PlayerController>();
-                    if (player != null)
-                    {
-                        player.TakeDamage(damage);
-                        lastDamageTime = Time.time;
-                        Debug.Log("玩家进入毒水坑，扣血 " + damage + " 点");
-                    }
+                    player.RespawnAtCheckpoint();
+                    Debug.Log("玩家掉入毒水坑，传送到存档点");
                 }
             }
         }
 
         private void OnTriggerStay2D(Collider2D collision)
         {
-            // 检测玩家停留在毒水坑中
+            // 同上
             if (collision.CompareTag("Player"))
             {
-                // 检查是否在伤害冷却期内
-                if (Time.time - lastDamageTime >= damageCooldown)
+                PlayerController player = collision.GetComponent<PlayerController>();
+                if (player != null)
                 {
-                    // 玩家进入毒水坑扣血
-                    PlayerController player = collision.GetComponent<PlayerController>();
-                    if (player != null)
-                    {
-                        player.TakeDamage(damage);
-                        lastDamageTime = Time.time;
-                        Debug.Log("玩家停留在毒水坑中，扣血 " + damage + " 点");
-                    }
+                    player.RespawnAtCheckpoint();
                 }
             }
         }

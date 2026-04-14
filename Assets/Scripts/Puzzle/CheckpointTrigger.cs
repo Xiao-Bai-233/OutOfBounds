@@ -131,6 +131,8 @@ namespace OutOfBounds.Puzzle
             // 播放音效
             if (triggerSound != null)
             {
+                // 使用 AudioSource.PlayClipAtPoint 可以在特定位置播放 3D 音效
+                // 或者如果场景有全局 AudioSource，也可以通过它播放
                 AudioSource.PlayClipAtPoint(triggerSound, transform.position);
             }
 
@@ -142,6 +144,12 @@ namespace OutOfBounds.Puzzle
             else
             {
                 Debug.LogWarning($"[CheckpointTrigger] {checkpointName}: 未找到 CameraController!");
+            }
+
+            // 更新全局检查点管理器
+            if (CheckpointManager.Instance != null)
+            {
+                CheckpointManager.Instance.SetCheckpoint(transform.position);
             }
 
             // 触发事件
