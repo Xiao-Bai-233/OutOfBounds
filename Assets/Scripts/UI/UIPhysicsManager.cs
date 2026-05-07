@@ -17,6 +17,10 @@ public class UIPhysicsManager : MonoBehaviour
     [SerializeField] private bool autoFindElements = true;
     [SerializeField] private bool debugMode;
 
+    [Header("心形掉落预制体")]
+    [SerializeField] [Tooltip("受伤时掉落到场景中的心形预制体")]
+    public GameObject heartFallPrefab;
+
     // 所有注册的UI物理元素
     private List<UIPhysicsElement> registeredElements = new List<UIPhysicsElement>();
     private List<UIPhysicsElement> elementsToRemove = new List<UIPhysicsElement>();
@@ -214,10 +218,149 @@ public class UIPhysicsManager : MonoBehaviour
 
     #endregion
 
+    #region 辅助检测方法
+
+    /// <summary>
+    /// 检查指定 DraggableUI 是否与任何固定物体重叠（固定UI元素 + Tilemap墙壁/地板）
+    /// </summary>
+    public bool IsOverlappingWithFixed(DraggableUI draggable)
+    {
+        if (draggable == null) return false;
+
+        // 1. 检查是否与固定 UI 元素重叠（isFixed 的 UIPhysicsElement）
+        RectTransform rt = draggable.GetComponent<RectTransform>();
+        if (rt != null)
+        {
+            Rect draggableRect = GetWorldRect(rt);
+
+            foreach (var element in registeredElements)
+            {
+                if (element == null || element.gameObject == draggable.gameObject) continue;
+                if (!element.isFixed) continue;
+
+                Rect fixedRect = GetWorldRect(element.RectTransform);
+                if (draggableRect.Overlaps(fixedRect))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // 2. 检查是否与 Tilemap 墙壁/地板重叠
+        // 墙壁层 Layer 15, 地板层 Layer 16
+        RectTransform elementRT = draggable.GetComponent<RectTransform>();
+        if (elementRT != null)
+        {
+            int tilemapLayerMask = (1 << 15) | (1 << 16); // Wall | Ground
+
+            // 方法 A：用 OverlapArea 直接检测矩形区域内的碰撞器（最直接）
+            Vector3[] corners = new Vector3[4];
+            elementRT.GetWorldCorners(corners);
+            // corners[0]=左下, corners[1]=左上, corners[2]=右上, corners[3]=右下
+            Vector2 areaMin = new Vector2(
+                Mathf.Min(corners[0].x, corners[1].x, corners[2].x, corners[3].x),
+                Mathf.Min(corners[0].y, corners[1].y, corners[2].y, corners[3].y)
+            );
+            Vector2 areaMax = new Vector2(
+                Mathf.Max(corners[0].x, corners[1].x, corners[2].x, corners[3].x),
+                Mathf.Max(corners[0].y, corners[1].y, corners[2].y, corners[3].y)
+            );
+
+            Collider2D[] tilemapHits = Physics2D.OverlapAreaAll(
+                areaMin,
+                areaMax,
+                tilemapLayerMask
+            );
+
+            if (tilemapHits.Length > 0)
+            {
+                return true;
+            }
+
+            // 方法 B：放大检测范围（防止元素刚好卡在边界上的情况）
+            Vector2 inflatedMin = areaMin - Vector2.one * 0.1f;
+            Vector2 inflatedMax = areaMax + Vector2.one * 0.1f;
+            Collider2D[] inflatedHits = Physics2D.OverlapAreaAll(
+                inflatedMin,
+                inflatedMax,
+                tilemapLayerMask
+            );
+
+            if (inflatedHits.Length > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 检查指定 DraggableUI 是否超出 Canvas 边界
+    /// </summary>
+    public bool IsOutsideCanvas(DraggableUI draggable)
+    {
+        if (draggable == null) return false;
+
+        RectTransform rt = draggable.GetComponent<RectTransform>();
+        if (rt == null) return false;
+
+        Canvas canvas = draggable.GetComponentInParent<Canvas>();
+        if (canvas == null) return false;
+
+        RectTransform canvasRT = canvas.transform as RectTransform;
+        if (canvasRT == null) return false;
+
+        Rect elementRect = GetWorldRect(rt);
+        Rect canvasRect = GetWorldRect(canvasRT);
+
+        // 检查元素是否完全在 Canvas 外（不重叠）
+        return !elementRect.Overlaps(canvasRect);
+    }
+
+    /// <summary>
+    /// 基于中心距离查找附近的 DraggableUI
+    /// 用于拖拽中重叠检测
+    /// </summary>
+    public List<DraggableUI> FindDraggablesByDistance(DraggableUI source, float distanceMultiplier = 1.2f)
+    {
+        List<DraggableUI> results = new List<DraggableUI>();
+        if (source == null) return results;
+
+        RectTransform sourceRT = source.GetComponent<RectTransform>();
+        if (sourceRT == null) return results;
+
+        Vector3 sourcePos = sourceRT.position;
+        float sourceRadius = sourceRT.rect.size.magnitude * 0.5f;
+
+        foreach (var element in registeredElements)
+        {
+            if (element == null || element.gameObject == source.gameObject) continue;
+
+            DraggableUI otherDraggable = element.GetComponent<DraggableUI>();
+            if (otherDraggable == null) continue;
+            if (otherDraggable.IsBeingDragged) continue;
+
+            RectTransform otherRT = element.RectTransform;
+            float otherRadius = otherRT.rect.size.magnitude * 0.5f;
+            float maxDistance = (sourceRadius + otherRadius) * distanceMultiplier;
+            float actualDistance = Vector3.Distance(sourcePos, otherRT.position);
+
+            if (actualDistance < maxDistance)
+            {
+                results.Add(otherDraggable);
+            }
+        }
+        return results;
+    }
+
+    #endregion
+
     #region 特殊元素生成
 
     /// <summary>
     /// 生成心形物理元素（支持对象池）
+    /// 所有物理/拖拽设置取自预制体，不再代码覆盖
     /// </summary>
     public UIPhysicsElement SpawnHeartElement(Vector2 position, float size = 50f, Transform parent = null, Sprite sprite = null)
     {
@@ -230,39 +373,25 @@ public class UIPhysicsManager : MonoBehaviour
             heartElement.gameObject.SetActive(true);
             heartElement.transform.SetParent(parent ?? transform);
             heartElement.transform.position = position;
-            
-            // 更新尺寸
-            RectTransform rect = heartElement.GetComponent<RectTransform>();
-            if (rect != null) rect.sizeDelta = new Vector2(size, size);
-
-            // 更新碰撞体尺寸
-            BoxCollider2D collider = heartElement.GetComponent<BoxCollider2D>();
-            if (collider != null) collider.size = new Vector2(size, size);
-            
-            // 更新 Image
-            var image = heartElement.GetComponent<UnityEngine.UI.Image>();
-            if (image != null)
-            {
-                image.sprite = sprite;
-                image.color = sprite != null ? Color.white : Color.red;
-            }
-
-            // 重置物理状态
             heartElement.ResetPhysics();
         }
         else
         {
-            // 池中没有，则创建新对象
-            GameObject heartObj = CreateHeartUI(size, sprite);
-            heartObj.transform.SetParent(parent ?? transform);
+            // 池中没有，从预制体实例化（预制体自带所有物理/拖拽配置）
+            if (heartFallPrefab == null)
+            {
+                Debug.LogError("[UIPhysicsManager] heartFallPrefab 未赋值！请将心形掉落预制体拖入 Inspector");
+                return null;
+            }
+            GameObject heartObj = Instantiate(heartFallPrefab, parent ?? transform);
             heartObj.transform.position = position;
 
-            heartElement = heartObj.AddComponent<UIPhysicsElement>();
-            heartElement.SetUseGravity(true);
+            heartElement = heartObj.GetComponent<UIPhysicsElement>();
+            if (heartElement == null) heartElement = heartObj.AddComponent<UIPhysicsElement>();
 
-            // 添加碰撞器
-            var collider = heartObj.AddComponent<BoxCollider2D>();
-            collider.size = new Vector2(size, size);
+            // 确保有碰撞器
+            if (heartObj.GetComponent<BoxCollider2D>() == null)
+                heartObj.AddComponent<BoxCollider2D>();
         }
 
         RegisterElement(heartElement);
@@ -289,30 +418,6 @@ public class UIPhysicsManager : MonoBehaviour
         {
             Destroy(element.gameObject);
         }
-    }
-
-    private GameObject CreateHeartUI(float size = 50f, Sprite sprite = null)
-    {
-        // 创建心形Image
-        var go = new GameObject("HeartElement");
-        var image = go.AddComponent<UnityEngine.UI.Image>();
-
-        if (sprite != null)
-        {
-            image.sprite = sprite;
-            image.color = Color.white;
-        }
-        else
-        {
-            // TODO: 需要美术提供心形Sprite
-            // 暂时使用圆形代替
-            image.color = Color.red;
-        }
-
-        RectTransform rect = go.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(size, size);
-
-        return go;
     }
 
     /// <summary>

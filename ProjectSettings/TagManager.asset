@@ -3,7 +3,9 @@
 --- !u!78 &1
 TagManager:
   serializedVersion: 3
-  tags: []
+  tags:
+  - NPC
+  - DamageZone
   layers:
   - Default
   - TransparentFX
@@ -12,16 +14,16 @@ TagManager:
   - Water
   - UI
   - UI_Physics
+  - 
+  - 
+  - 
+  - DamageZone
+  - NPC
+  - 
   - Player
   - 
   - Wall
   - Ground
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
   - 
   - 
   - 

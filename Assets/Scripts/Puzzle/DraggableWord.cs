@@ -1,104 +1,201 @@
 using UnityEngine;
-using UnityEngine.UI;
-using UnityEngine.EventSystems;
 using OutOfBounds.UI;
 using OutOfBounds.DragSystem;
 
 namespace OutOfBounds.Puzzle
 {
     /// <summary>
-    /// 可拖拽单词组件
-    /// 用于文字解密玩法 - 单词可以从文本中脱离并变为物理对象
+    /// 可拖拽单词组件（精简版）
+    /// 仅负责：单词身份标识、脱离/重置行为逻辑、事件通知、BrokenGlyph 状态
+    /// 物理由 UIPhysicsElement 接管，拖拽由 DraggableUI 接管
+    /// 上下文限制由 UIContextConstraint 接管
     /// </summary>
-    [RequireComponent(typeof(RectTransform))]
-    public class DraggableWord : MonoBehaviour, IPointerClickHandler, IBeginDragHandler, IDragHandler, IEndDragHandler
+    public class DraggableWord : MonoBehaviour
     {
         [Header("单词设置")]
-        [Tooltip("单词内容（用于显示）")]
+        [Tooltip("单词内容（用于身份识别）")]
         [SerializeField] private string wordText = "[SPACE]";
 
-        [Header("视觉样式")]
-        [Tooltip("单词背景图片")]
-        [SerializeField] private Image backgroundImage;
-        [Tooltip("普通状态颜色")]
-        [SerializeField] private Color normalColor = new Color(0.2f, 0.2f, 0.2f, 0.8f);
-        [Tooltip("悬停状态颜色")]
-        [SerializeField] private Color hoverColor = new Color(0.3f, 0.3f, 0.3f, 0.9f);
-        [Tooltip("已脱离状态颜色")]
-        [SerializeField] private Color detachedColor = new Color(1f, 0.8f, 0.2f, 1f);
+        [Header("视觉反馈")]
+        [Tooltip("脱离状态颜色（如果物体有 Image 组件）")]
+        [SerializeField] private Color detachedTint = new Color(1f, 0.8f, 0.2f, 1f);
 
-        [Header("脱离物理设置")]
-        [Tooltip("脱离后是否启用重力")]
-        [SerializeField] private bool enableGravityWhenDetached = true;
-        [Tooltip("脱离后的重力值")]
-        [SerializeField] private float detachedGravity = -20f;
-        [Tooltip("脱离时的初始速度")]
-        [SerializeField] private Vector2 initialVelocity = Vector2.zero;
+        [Tooltip("乱码化颜色（BrokenGlyph 状态）")]
+        [SerializeField] private Color brokenTint = new Color(1f, 0.2f, 0.2f, 0.5f);
 
-        [Header("Inspector可拖拽资源")]
-        [Tooltip("背景精灵（可选）")]
-        [SerializeField] private Sprite backgroundSprite;
-        [Tooltip("父级文本框（用于计算相对位置）")]
-        [SerializeField] private RectTransform parentTextContainer;
+        [Tooltip("乱码化时的抖动强度")]
+        [SerializeField] private float brokenShakeIntensity = 2f;
 
-        // 组件引用
-        private RectTransform rectTransform;
-        private Text label;
-        private Canvas parentCanvas;
-        private BoxCollider2D groundCollider;
+        [Header("上下文限制（BrokenGlyph）")]
+        [Tooltip("上下文限制组件 — 检测是否离开语义区域")]
+        [SerializeField] private UIContextConstraint contextConstraint;
 
         // 状态
-        private bool isDetached = false;           // 是否已从文本脱离
-        private bool isDragging = false;
-        private bool hasAddedCollider = false;      // 是否已添加碰撞器
-        private Vector2 velocity = Vector2.zero;
-        private Vector2 dragOffset;
-        private Vector2 lastPosition;
+        private bool isDetached = false;
+        private bool isBroken = false;
+        private UnityEngine.UI.Image cachedImage;
+        private Color originalColor;
+        private Vector3 originalLocalPos;
+        private BoxCollider2D boxCollider;
 
-        // 事件
-        public event System.Action<DraggableWord> OnWordDetached;      // 单词脱离时
-        public event System.Action<DraggableWord> OnWordDropped;      // 单词放下时
-        public event System.Action<DraggableWord, Vector2> OnWordMoved; // 单词移动时
+        // 事件 — 供 StageConfig 订阅
+        public event System.Action<DraggableWord> OnWordDetached;
+        public event System.Action<DraggableWord> OnWordDropped;
+        public event System.Action<DraggableWord> OnWordBroken;
+        public event System.Action<DraggableWord> OnWordRestored;
 
         // 属性
         public bool IsDetached => isDetached;
+        public bool IsBroken => isBroken;
         public string WordText => wordText;
-        public RectTransform Rect => rectTransform;
+        public RectTransform Rect => GetComponent<RectTransform>();
 
         #region Unity 生命周期
 
         private void Awake()
         {
-            rectTransform = GetComponent<RectTransform>();
-            parentCanvas = GetComponentInParent<Canvas>();
+            cachedImage = GetComponent<UnityEngine.UI.Image>();
+            boxCollider = GetComponent<BoxCollider2D>();
+            contextConstraint = GetComponent<UIContextConstraint>();
 
-            // 确保有 Text 组件
-            label = GetComponent<Text>();
-            if (label == null)
-            {
-                label = gameObject.AddComponent<Text>();
-                label.text = wordText;
-                label.alignment = TextAnchor.MiddleCenter;
-                label.fontSize = 24;
-                label.color = Color.white;
-            }
+            if (cachedImage != null)
+                originalColor = cachedImage.color;
 
-            // 设置初始样式
-            SetupAppearance();
+            originalLocalPos = transform.localPosition;
         }
 
         private void Start()
         {
-            lastPosition = rectTransform.anchoredPosition;
+            var draggable = GetComponent<DraggableUI>();
+            if (draggable != null)
+            {
+                draggable.OnDragStart += HandleDragStart;
+                draggable.OnDragEnd += HandleDragEnd;
+            }
+
+            // 订阅上下文限制事件
+            if (contextConstraint != null)
+            {
+                contextConstraint.OnConstraintViolated += OnContextViolated;
+                contextConstraint.OnConstraintRestored += OnContextRestored;
+            }
         }
 
-        private void Update()
+        private void OnDestroy()
         {
-            if (isDetached && !isDragging)
+            var draggable = GetComponent<DraggableUI>();
+            if (draggable != null)
             {
-                // 应用物理模拟
-                ApplyPhysics();
+                draggable.OnDragStart -= HandleDragStart;
+                draggable.OnDragEnd -= HandleDragEnd;
             }
+
+            if (contextConstraint != null)
+            {
+                contextConstraint.OnConstraintViolated -= OnContextViolated;
+                contextConstraint.OnConstraintRestored -= OnContextRestored;
+            }
+        }
+
+        #endregion
+
+        #region 事件回调
+
+        private void HandleDragStart(DraggableUI draggable)
+        {
+            // 乱码状态下不能拖拽
+            if (isBroken) return;
+            DetachWord();
+        }
+
+        private void HandleDragEnd(DraggableUI draggable)
+        {
+            if (isDetached && !isBroken)
+                OnWordDropped?.Invoke(this);
+        }
+
+        private void OnContextViolated(UIContextConstraint constraint)
+        {
+            BecomeBrokenGlyph();
+        }
+
+        private void OnContextRestored(UIContextConstraint constraint)
+        {
+            RestoreGlyph();
+        }
+
+        #endregion
+
+        #region BrokenGlyph 机制
+
+        /// <summary>
+        /// 变成乱码 — 脱离语义区域后的惩罚
+        /// 视觉损坏 + 禁用碰撞 + 抖动
+        /// </summary>
+        public void BecomeBrokenGlyph()
+        {
+            if (isBroken) return;
+            isBroken = true;
+
+            // 视觉反馈
+            if (cachedImage != null)
+                cachedImage.color = brokenTint;
+
+            // 禁用碰撞（变成 Broken Glyph — 无碰撞的废料）
+            if (boxCollider != null)
+                boxCollider.enabled = false;
+
+            // 禁用物理
+            var physicsElement = GetComponent<UIPhysicsElement>();
+            if (physicsElement != null)
+            {
+                physicsElement.SetColliderEnabled(false);
+                physicsElement.SetPhysicsLocked(true);
+                physicsElement.SetVelocity(Vector2.zero);
+                physicsElement.isPlatform = false;
+            }
+
+            // 禁用拖拽
+            var draggable = GetComponent<DraggableUI>();
+            if (draggable != null)
+                draggable.SetDraggable(false);
+
+            OnWordBroken?.Invoke(this);
+            Debug.Log($"[DraggableWord] 单词 '{wordText}' 变成 Broken Glyph — Token lost semantic context.");
+        }
+
+        /// <summary>
+        /// 恢复乱码 — 回到语义区域后恢复
+        /// </summary>
+        public void RestoreGlyph()
+        {
+            if (!isBroken) return;
+            isBroken = false;
+
+            // 恢复视觉
+            if (cachedImage != null)
+                cachedImage.color = isDetached ? detachedTint : originalColor;
+
+            // 恢复碰撞
+            if (boxCollider != null)
+                boxCollider.enabled = true;
+
+            // 恢复物理
+            var physicsElement = GetComponent<UIPhysicsElement>();
+            if (physicsElement != null)
+            {
+                physicsElement.SetColliderEnabled(true);
+                physicsElement.SetPhysicsLocked(false);
+                physicsElement.isPlatform = true;
+            }
+
+            // 恢复拖拽
+            var draggable = GetComponent<DraggableUI>();
+            if (draggable != null)
+                draggable.SetDraggable(true);
+
+            OnWordRestored?.Invoke(this);
+            Debug.Log($"[DraggableWord] 单词 '{wordText}' 已恢复 — Token restored.");
         }
 
         #endregion
@@ -106,270 +203,57 @@ namespace OutOfBounds.Puzzle
         #region 公共方法
 
         /// <summary>
-        /// 触发单词脱离（从文本中释放）
+        /// 触发单词脱离
         /// </summary>
         public void DetachWord()
         {
-            if (isDetached) return;
-
+            if (isDetached || isBroken) return;
             isDetached = true;
-            velocity = initialVelocity;
 
-            // 改变颜色
-            SetBackgroundColor(detachedColor);
+            if (cachedImage != null)
+                cachedImage.color = detachedTint;
 
-            // 如果有父级，解绑
             if (transform.parent != null)
             {
-                transform.SetParent(parentCanvas.transform, true);
+                Canvas parentCanvas = GetComponentInParent<Canvas>();
+                if (parentCanvas != null)
+                    transform.SetParent(parentCanvas.transform, true);
             }
 
-            // 通知事件
             OnWordDetached?.Invoke(this);
-
-            Debug.Log($"[DraggableWord] 单词 '{wordText}' 已脱离文本");
+            Debug.Log($"[DraggableWord] 单词 '{wordText}' 已脱离");
         }
 
         /// <summary>
-        /// 重置单词回到文本状态
+        /// 重置单词回到初始状态
         /// </summary>
         public void ResetWord()
         {
             isDetached = false;
-            isDragging = false;
-            velocity = Vector2.zero;
+            isBroken = false;
 
-            // 移除碰撞器
-            if (groundCollider != null)
+            if (cachedImage != null)
+                cachedImage.color = originalColor;
+
+            if (boxCollider != null)
+                boxCollider.enabled = true;
+
+            var physicsElement = GetComponent<UIPhysicsElement>();
+            if (physicsElement != null)
             {
-                Destroy(groundCollider);
-                groundCollider = null;
+                physicsElement.SetColliderEnabled(true);
+                physicsElement.SetPhysicsLocked(false);
+                physicsElement.SetVelocity(Vector2.zero);
+                physicsElement.isPlatform = true;
             }
-            hasAddedCollider = false;
 
-            // 恢复颜色
-            SetBackgroundColor(normalColor);
+            var draggable = GetComponent<DraggableUI>();
+            if (draggable != null)
+                draggable.SetDraggable(true);
 
-            // 通知事件
             OnWordDropped?.Invoke(this);
-
             Debug.Log($"[DraggableWord] 单词 '{wordText}' 已重置");
         }
-
-        /// <summary>
-        /// 设置单词内容
-        /// </summary>
-        public void SetWordText(string text)
-        {
-            wordText = text;
-            if (label != null)
-            {
-                label.text = text;
-            }
-        }
-
-        /// <summary>
-        /// 获取当前速度
-        /// </summary>
-        public Vector2 GetVelocity() => velocity;
-
-        /// <summary>
-        /// 设置速度（用于外部影响）
-        /// </summary>
-        public void SetVelocity(Vector2 vel)
-        {
-            velocity = vel;
-        }
-
-        #endregion
-
-        #region 私有方法
-
-        private void SetupAppearance()
-        {
-            // 添加或配置背景图片
-            if (backgroundImage == null)
-            {
-                var bgObj = new GameObject("Background");
-                bgObj.transform.SetParent(transform);
-                bgObj.transform.SetAsFirstSibling();
-
-                backgroundImage = bgObj.AddComponent<Image>();
-                backgroundImage.raycastTarget = false; // 让背景不阻挡点击
-
-                var bgRect = bgObj.GetComponent<RectTransform>();
-                bgRect.anchorMin = Vector2.zero;
-                bgRect.anchorMax = Vector2.one;
-                bgRect.sizeDelta = Vector2.zero;
-                bgRect.anchoredPosition = Vector2.zero;
-            }
-
-            // 应用精灵和颜色
-            if (backgroundSprite != null)
-            {
-                backgroundImage.sprite = backgroundSprite;
-            }
-            backgroundImage.color = normalColor;
-        }
-
-        private void SetBackgroundColor(Color color)
-        {
-            if (backgroundImage != null)
-            {
-                backgroundImage.color = color;
-            }
-        }
-
-        private void ApplyPhysics()
-        {
-            if (!enableGravityWhenDetached) return;
-
-            // 简单的物理模拟
-            float deltaTime = Time.deltaTime;
-
-            // 应用重力
-            velocity.y += detachedGravity * deltaTime;
-
-            // 更新位置
-            Vector2 newPosition = rectTransform.anchoredPosition + velocity * deltaTime;
-
-            // 边界检测（如果存在父容器）
-            if (parentTextContainer != null)
-            {
-                ClampToParent(ref newPosition);
-            }
-
-            rectTransform.anchoredPosition = newPosition;
-            lastPosition = newPosition;
-
-            // 检测是否落地（速度接近0且在下方）
-            CheckIfLanded();
-        }
-
-        private void ClampToParent(ref Vector2 position)
-        {
-            if (parentTextContainer == null) return;
-
-            Vector2 parentSize = parentTextContainer.sizeDelta;
-            Vector2 halfSize = rectTransform.sizeDelta * 0.5f;
-
-            // 简单的边界约束
-            float minX = -parentSize.x * 0.5f + halfSize.x;
-            float maxX = parentSize.x * 0.5f - halfSize.x;
-            float minY = -parentSize.y * 0.5f + halfSize.y;
-            float maxY = parentSize.y * 0.5f - halfSize.y;
-
-            position.x = Mathf.Clamp(position.x, minX, maxX);
-            position.y = Mathf.Clamp(position.y, minY, maxY);
-        }
-
-        private void CheckIfLanded()
-        {
-            // 如果速度很小且在移动，视为落地
-            if (velocity.magnitude < 0.5f && !hasAddedCollider)
-            {
-                // 添加碰撞器，让玩家可以踩在上面
-                AddGroundCollider();
-            }
-        }
-
-        private void AddGroundCollider()
-        {
-            if (groundCollider != null) return;
-
-            groundCollider = gameObject.AddComponent<BoxCollider2D>();
-            groundCollider.size = rectTransform.sizeDelta;
-            groundCollider.offset = Vector2.zero;
-            groundCollider.isTrigger = false; // 实体碰撞，让玩家能站在上面
-
-            hasAddedCollider = true;
-            Debug.Log($"[DraggableWord] 已添加碰撞器，尺寸: {groundCollider.size}");
-        }
-
-        #endregion
-
-        #region IPointerClickHandler
-
-        public void OnPointerClick(PointerEventData eventData)
-        {
-            // 如果还没脱离，点击可以触发脱离（作为备用触发方式）
-            if (!isDetached && eventData.button == PointerEventData.InputButton.Left)
-            {
-                // 可以在这里实现点击脱离，或者留给拖拽
-            }
-        }
-
-        #endregion
-
-        #region IBeginDragHandler
-
-        public void OnBeginDrag(PointerEventData eventData)
-        {
-            if (!isDetached)
-            {
-                // 拖拽时自动脱离
-                DetachWord();
-            }
-
-            isDragging = true;
-            dragOffset = rectTransform.anchoredPosition - GetDragPosition(eventData);
-        }
-
-        #endregion
-
-        #region IDragHandler
-
-        public void OnDrag(PointerEventData eventData)
-        {
-            if (!isDragging) return;
-
-            Vector2 newPosition = GetDragPosition(eventData) + dragOffset;
-            rectTransform.anchoredPosition = newPosition;
-            lastPosition = newPosition;
-
-            // 拖拽时清空速度
-            velocity = Vector2.zero;
-
-            OnWordMoved?.Invoke(this, newPosition);
-        }
-
-        private Vector2 GetDragPosition(PointerEventData eventData)
-        {
-            Vector2 localPoint;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                parentCanvas.transform as RectTransform,
-                eventData.position,
-                eventData.pressEventCamera,
-                out localPoint
-            );
-            return localPoint;
-        }
-
-        #endregion
-
-        #region IEndDragHandler
-
-        public void OnEndDrag(PointerEventData eventData)
-        {
-            isDragging = false;
-            velocity = Vector2.zero;
-
-            OnWordDropped?.Invoke(this);
-        }
-
-        #endregion
-
-        #region 编辑器支持
-
-        #if UNITY_EDITOR
-        private void OnValidate()
-        {
-            if (label != null && !Application.isPlaying)
-            {
-                label.text = wordText;
-            }
-        }
-        #endif
 
         #endregion
     }

@@ -26,10 +26,17 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
     [Header("地面检测")]
     [SerializeField] private LayerMask groundLayer;
     [SerializeField] private LayerMask uiPhysicsLayer; // 专门用于检测 UI 物理层的掩码
-    [SerializeField] private float groundCheckDistance = 0.1f;
+    [SerializeField] private float groundCheckDistance = 0.35f;  // 适配斜坡
     [SerializeField] private Vector2 groundCheckOffset = new Vector2(0f, -0.5f);
     [SerializeField] private PhysicsMaterial2D frictionMaterial; // 走路时的摩擦力材质
     [SerializeField] private PhysicsMaterial2D noFrictionMaterial; // 斜坡防止下滑的材质
+
+    [Header("斜坡检测")]
+    [Tooltip("地面射线数量（左/中/右），越多对斜坡越灵敏")]
+    [SerializeField] private int groundRayCount = 3;
+    [Tooltip("射线宽度比例（占 collider 宽度的百分比）")]
+    [Range(0.1f, 0.9f)]
+    [SerializeField] private float groundRaySpread = 0.7f;
 
     // 组件引用
     private Rigidbody2D rb;
@@ -227,11 +234,10 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
             rb.linearVelocity = new Vector2(newVelocityX, rb.linearVelocity.y);
         }
         
-        // 5. 动态调整材质防止斜坡滑落
+        // 5. 动态调整材质——着地时用摩擦力材质（抓地），空中用无摩擦
         if (col != null)
         {
-            bool shouldUseFriction = isCurrentlyGrounded && Mathf.Abs(moveInput.x) < 0.01f;
-            col.sharedMaterial = shouldUseFriction ? frictionMaterial : noFrictionMaterial;
+            col.sharedMaterial = isCurrentlyGrounded ? frictionMaterial : noFrictionMaterial;
         }
     }
 
@@ -305,20 +311,33 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
     {
         if (col == null) return false;
 
-        // 1. 标准地面检测 (BoxCast)
         Bounds bounds = col.bounds;
-        Vector2 boxSize = new Vector2(bounds.size.x * 0.8f, 0.1f);
-        Vector2 boxOrigin = new Vector2(bounds.center.x, bounds.min.y + 0.05f);
-        float rayLength = groundCheckDistance + 0.1f;
+        float checkDistance = groundCheckDistance + 0.05f;
 
-        RaycastHit2D groundHit = Physics2D.BoxCast(boxOrigin, boxSize, 0f, Vector2.down, rayLength, groundLayer);
-        if (groundHit.collider != null) return true;
+        // 1. 多射线地面检测（左/中/右）— 适配斜坡
+        //    用射线代替 BoxCast，每条射线独立打向地面
+        Vector2 bottomCenter = new Vector2(bounds.center.x, bounds.min.y);
+        float halfSpread = bounds.size.x * groundRaySpread * 0.5f;
 
-        // 2. 物理 UI 平台检测 (优化：改用 OverlapCircle 增加斜坡容错性)
+        for (int i = 0; i < groundRayCount; i++)
+        {
+            // 计算当前射线的水平偏移：左(-) → 中(0) → 右(+)
+            float t = groundRayCount > 1
+                ? (float)i / (groundRayCount - 1) * 2f - 1f  // [-1, 1]
+                : 0f;
+
+            Vector2 rayOrigin = bottomCenter + Vector2.right * (halfSpread * t);
+            RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, checkDistance, groundLayer);
+            if (hit.collider != null)
+            {
+                return true;
+            }
+        }
+
+        // 2. 物理 UI 平台检测 (OverlapCircle 圆检测 — 天然适配斜坡)
         Vector2 circlePos = new Vector2(bounds.center.x, bounds.min.y);
         float circleRadius = bounds.extents.x * 0.9f;
-        
-        // 增加检测范围适配陡峭斜坡
+
         Collider2D[] hits = Physics2D.OverlapCircleAll(circlePos, circleRadius + groundCheckDistance + 0.1f, uiPhysicsLayer);
         foreach (Collider2D hit in hits)
         {
@@ -449,14 +468,28 @@ public class PlayerController : MonoBehaviour, IPhysicsObject
         if (col == null) col = GetComponent<Collider2D>();
         if (col == null) return;
 
-        // 绘制标准地面检测框 (BoxCast 区域)
-        Gizmos.color = isCurrentlyGrounded ? Color.green : Color.red;
         Bounds bounds = col.bounds;
-        Vector2 boxSize = new Vector2(bounds.size.x * 0.8f, 0.05f);
-        Vector2 boxOrigin = new Vector2(bounds.center.x, bounds.min.y - groundCheckDistance);
-        Gizmos.DrawWireCube(boxOrigin, boxSize);
+        float checkDistance = groundCheckDistance + 0.05f;
+        float halfSpread = bounds.size.x * groundRaySpread * 0.5f;
+        Vector2 bottomCenter = new Vector2(bounds.center.x, bounds.min.y);
 
-        // 绘制平台检测半径 (OverlapCircle 区域)
+        // 绘制地面射线 (左/中/右)
+        Gizmos.color = isCurrentlyGrounded ? Color.green : Color.red;
+        for (int i = 0; i < groundRayCount; i++)
+        {
+            float t = groundRayCount > 1
+                ? (float)i / (groundRayCount - 1) * 2f - 1f
+                : 0f;
+            Vector2 rayOrigin = bottomCenter + Vector2.right * (halfSpread * t);
+            Vector2 rayEnd = rayOrigin + Vector2.down * checkDistance;
+            Gizmos.DrawLine(rayOrigin, rayEnd);
+
+            // 在射线终点画小圆点标记
+            Gizmos.DrawWireSphere(rayEnd, 0.03f);
+        }
+
+        // 绘制 UI 平台检测半径 (OverlapCircle)
+        Gizmos.color = isCurrentlyGrounded ? Color.green : Color.red;
         Vector2 circlePos = (Vector2)transform.position + groundCheckOffset;
         Gizmos.DrawWireSphere(circlePos, bounds.extents.x * 0.9f + groundCheckDistance);
     }

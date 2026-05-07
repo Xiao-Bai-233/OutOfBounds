@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using System.Collections;
 using OutOfBounds.Core;
 using OutOfBounds.Physics;
 using OutOfBounds.Utils;
@@ -16,12 +17,11 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
 {
     [Header("物理属性")]
     [SerializeField] public float mass = 1f;
-    [SerializeField] public float drag = 1.5f; // 进一步增加阻力
+    [SerializeField] public float drag = 1.5f;
     [SerializeField] public float angularDrag = 1f;
     [SerializeField] public bool useGravity = true;
     [SerializeField] public bool isKinematic;
-    [SerializeField] public float gravityScale = 0.3f; // 降低重力
-    [SerializeField] public bool isFloating = true; // 是否漂浮（不受重力影响）
+    [SerializeField] public float gravityScale = 1f; // 正常重力
     
     [Header("固定模式")]
     [SerializeField] public bool isFixed = false; // 是否固定（作为地面/墙壁）
@@ -37,6 +37,10 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     [SerializeField] public float collisionCheckDistance = 0.05f; // 进一步减小检测距离
     [SerializeField] public bool isPlatform = true; // 是否作为平台（允许玩家站上去）
 
+    [Header("卡住保护")]
+    [Tooltip("碰撞到墙壁/地板时自动锁定物理（由 DraggableUI 在释放时短暂启用）")]
+    [SerializeField] public bool autoLockOnWallCollision = false;
+
     [Header("边界")]
     [SerializeField] protected bool constrainToParent = true;
     [SerializeField] protected RectOffset boundaryPadding;
@@ -46,7 +50,9 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     protected float angularVelocity; // 改为标量，2D旋转只有Z轴
     protected float rotation; // 当前旋转角度
     protected bool isBeingDragged;
+    protected bool physicsLocked; // 物理锁定：卡在墙壁/地板中时暂停所有物理
     protected Vector2 lastPosition;
+    private Coroutine enableColliderRoutine; // 碰撞器恢复协程引用
 
     // 组件
     protected RectTransform rectTransform;
@@ -60,7 +66,6 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     public System.Action<UIPhysicsElement> OnBecameGrounded;
     public System.Action<UIPhysicsElement> OnLeftGround;
 
-    // 状态
     protected bool wasGrounded;
 
     #region Unity 生命周期
@@ -128,13 +133,21 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
         // 固定模式下不更新物理
         if (isFixed) return;
         
-        if (isBeingDragged || isKinematic) return;
+        if (isBeingDragged || isKinematic || physicsLocked) return;
 
         // 应用旋转
         ApplyRotation();
 
         // 子步进碰撞检测，防止高速穿模
         int subSteps = 4;
+        
+        // ★ NaN 防护：速度出现异常值时归零
+        if (float.IsNaN(velocity.x) || float.IsNaN(velocity.y) || float.IsInfinity(velocity.x) || float.IsInfinity(velocity.y))
+        {
+            velocity = Vector2.zero;
+            Debug.LogWarning($"[UIPhysicsElement] {name} 速度异常 NaN/Inf，已归零");
+        }
+        
         Vector2 totalVelocity = velocity * Time.deltaTime;
         Vector2 stepVelocity = totalVelocity / subSteps;
         
@@ -175,7 +188,7 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
 
     protected virtual void FixedUpdate()
     {
-        if (isBeingDragged || isKinematic) return;
+        if (isBeingDragged || isKinematic || physicsLocked) return;
 
         // 应用重力
         ApplyGravity();
@@ -210,7 +223,7 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
 
     protected virtual void ApplyGravity()
     {
-        if (useGravity && !isFloating)
+        if (useGravity)
         {
             // 如果已经在地面上且速度很小，停止累积重力速度
             if (IsGrounded() && velocity.y <= 0.01f)
@@ -412,16 +425,16 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
 
         // 限制检测距离，避免误检测
         float velocityMag = velocity.magnitude;
-        float stepDistance = velocityMag * Time.deltaTime / 3f; // 对应子步进
-        float checkDistance = Mathf.Min(size.magnitude * 0.1f, stepDistance * 1.1f);
-        checkDistance = Mathf.Max(checkDistance, 0.01f); // 最小检测距离
+        float stepDistance = velocityMag * Time.deltaTime / 3f;
+        // ★ 增大最小检测距离（薄 UI 如菜单栏需要更大的检测范围）
+        float checkDistance = Mathf.Min(size.magnitude * 0.5f, stepDistance * 1.1f);
+        checkDistance = Mathf.Max(checkDistance, 0.5f);
 
-        // 即使物体静止，也检测碰撞（用于与玩家等场景物体的碰撞）
         Vector2 moveDirection = velocity.normalized;
         if (velocityMag < 0.01f)
         {
-            moveDirection = Vector2.down; // 静止时向下检测，用于检测地面
-            checkDistance = 0.1f; // 静止时使用固定检测距离
+            moveDirection = Vector2.down;
+            checkDistance = 1.0f; // ★ 静止时向下检测 1 单位
         }
 
         // 执行 BoxCast 检测 - 使用 Collider 的实际大小
@@ -441,6 +454,28 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
             
             // 忽略触发器
             if (hit.collider.isTrigger) continue;
+
+            // ★ 自动锁定模式：碰撞到墙壁(Wall Layer 15)或地板(Ground Layer 16)时立即锁定物理
+            // 这是由 DraggableUI 在释放时短暂启用的，确保元素卡在墙里后不再被弹出
+            if (autoLockOnWallCollision)
+            {
+                int hitLayer = hit.collider.gameObject.layer;
+                if (hitLayer == 15 || hitLayer == 16)
+                {
+                    physicsLocked = true;
+                    SetColliderEnabled(false);
+                    velocity = Vector2.zero;
+                    Debug.Log($"[{name}] 碰撞到墙壁/地板，自动锁定物理并禁用碰撞器");
+                    return; // 跳过碰撞反弹，元素直接卡住
+                }
+            }
+
+            // ★ 物理锁定状态下，跳过墙壁和地板的碰撞
+            if (physicsLocked)
+            {
+                int hitLayer = hit.collider.gameObject.layer;
+                if (hitLayer == 15 || hitLayer == 16) continue;
+            }
 
             // 计算相对速度在碰撞法线方向的分量
             float velocityAlongNormal = Vector2.Dot(velocity, hit.normal);
@@ -464,6 +499,13 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     /// </summary>
     protected virtual void HandleCollisionPhysics(RaycastHit2D hit)
     {
+        // ★ 物理锁定且碰撞对象是墙壁/地板 → 完全不处理碰撞反弹
+        if (physicsLocked)
+        {
+            int hitLayer = hit.collider != null ? hit.collider.gameObject.layer : -1;
+            if (hitLayer == 15 || hitLayer == 16) return;
+        }
+
         // 1. 位置修正 (Depenetration) - 防止物体嵌入导致抽搐
         // 只有在嵌入较深时才强制推开，否则微调
         float penetration = 0.05f - hit.distance;
@@ -569,6 +611,12 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
         isBeingDragged = true;
         velocity = Vector2.zero;
         angularVelocity = 0f;
+
+        // 取消任何待处理的碰撞器恢复（防止组合后仍被恢复）
+        CancelColliderRestore();
+
+        // 拖拽时禁用碰撞器，避免与玩家/场景物体碰撞
+        SetColliderEnabled(false);
     }
 
     /// <summary>
@@ -598,7 +646,24 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     public virtual void EndDrag(Vector2 releaseVelocity)
     {
         isBeingDragged = false;
+        physicsLocked = false;  // ★ 确保不被锁定
+        isKinematic = false;    // ★ 确保不是运动学
+        isFixed = false;        // ★ 确保不是固定
         velocity = releaseVelocity;
+
+        // 恢复碰撞器（延迟一帧，确保位置稳定后再参与碰撞）
+        enableColliderRoutine = StartCoroutine(EnableColliderNextFrame());
+    }
+
+    private System.Collections.IEnumerator EnableColliderNextFrame()
+    {
+        yield return null; // 等待一帧
+        enableColliderRoutine = null;
+        // 如果物理已被锁定（卡在墙壁/地板中），不恢复碰撞器
+        if (!physicsLocked)
+        {
+            SetColliderEnabled(true);
+        }
     }
 
     #endregion
@@ -632,6 +697,66 @@ public class UIPhysicsElement : MonoBehaviour, IPhysicsObject
     public void SetUseGravity(bool value)
     {
         useGravity = value;
+    }
+
+    /// <summary>
+    /// 取消待处理的碰撞器恢复（组合成功后调用）
+    /// </summary>
+    public void CancelColliderRestore()
+    {
+        if (enableColliderRoutine != null)
+        {
+            StopCoroutine(enableColliderRoutine);
+            enableColliderRoutine = null;
+        }
+        SetColliderEnabled(false);
+    }
+
+    /// <summary>
+    /// 设置碰撞器启用状态
+    /// </summary>
+    public void SetColliderEnabled(bool enabled)
+    {
+        BoxCollider2D collider = GetComponent<BoxCollider2D>();
+        if (collider != null)
+        {
+            collider.enabled = enabled;
+        }
+    }
+
+    /// <summary>
+    /// 设置物理锁定状态（卡在墙壁/地板中时锁定）
+    /// 锁定后所有物理更新和碰撞检测都会跳过
+    /// </summary>
+    public void SetPhysicsLocked(bool locked)
+    {
+        physicsLocked = locked;
+        if (locked)
+        {
+            velocity = Vector2.zero;
+            angularVelocity = 0f;
+        }
+    }
+
+    /// <summary>
+    /// 当前是否物理锁定
+    /// </summary>
+    public bool IsPhysicsLocked => physicsLocked;
+
+    /// <summary>
+    /// 应用 UITypeProfile 配置到物理参数（来自 ScriptableObject）
+    /// </summary>
+    public void ApplyProfile(Data.UITypeProfile profile)
+    {
+        if (profile == null) return;
+
+        mass = profile.mass;
+        drag = (float)profile.drag;
+        bounciness = profile.bounciness;
+        friction = profile.friction;
+        gravityScale = profile.gravityScale;
+        useGravity = profile.useGravity;
+        isPlatform = profile.isPlatform;
     }
 
     /// <summary>

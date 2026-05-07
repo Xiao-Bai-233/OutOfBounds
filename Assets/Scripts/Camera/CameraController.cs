@@ -39,6 +39,12 @@ namespace OutOfBounds.Camera
         [Tooltip("当玩家在空中时的额外垂直偏移（例如下落时看下方）")]
         public float airVerticalBias = -1f;
 
+        [Header("水平偏移")]
+        [Tooltip("角色放在画面的左/右侧（正数=角色偏左，视野看右边）")]
+        public float horizontalOffset = 0f;
+        [Tooltip("水平偏移平滑速度")]
+        public float horizontalOffsetSmoothSpeed = 5f;
+
         [Header("边界与限制")]
         public bool limitBounds = false;
         public Vector2 boundsMin;
@@ -90,6 +96,9 @@ namespace OutOfBounds.Camera
             targetPos.z = transform.position.z;
             targetPos += lookAheadOffset;
             targetPos.y += verticalOffset + currentVerticalBias;
+
+            // ★ 水平偏移：让角色偏左/右侧（+ = 在看右边，角色偏左）
+            targetPos.x += horizontalOffset;
 
             // 4. 水平边界限制
             if (limitPlayerToLeftSide)
@@ -159,6 +168,7 @@ namespace OutOfBounds.Camera
             if (target == null) return;
             Vector3 pos = target.position;
             pos.z = transform.position.z;
+            pos.x += horizontalOffset;  // 水平偏移
             pos.y += verticalOffset;
             transform.position = pos;
             currentVelocity = Vector3.zero;

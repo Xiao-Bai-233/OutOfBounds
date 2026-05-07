@@ -86,6 +86,15 @@ namespace OutOfBounds.Core
         public static readonly GameEvent<UIPhysicsElement> OnUIElementGrabbed = new();
         public static readonly GameEvent<UIPhysicsElement> OnUIElementReleased = new();
         public static readonly GameEvent<UIPhysicsElement> OnUIElementBounced = new();
+        public static readonly GameEvent<UIPhysicsElement> OnUIElementContextLost = new();
+        public static readonly GameEvent<UIPhysicsElement> OnUIElementContextRestored = new();
+        public static readonly GameEvent<UIPhysicsElement> OnUIElementBrokenGlyph = new();
+
+        // 关卡事件
+        public static readonly GameEvent<int> OnLevelSelected = new();
+        public static readonly GameEvent<int> OnLevelStarted = new();
+        public static readonly GameEvent<int> OnLevelCompleted = new();
+        public static readonly GameEvent<int> OnLevelUnlocked = new();
 
         /// <summary>
         /// 清理所有事件订阅
@@ -103,9 +112,17 @@ namespace OutOfBounds.Core
             OnPlayerDamaged.Clear();
             OnPlayerDead.Clear();
             OnPlayerRespawn.Clear();
+            OnLevelSelected.Clear();
+            OnLevelStarted.Clear();
+            OnLevelCompleted.Clear();
+            OnLevelUnlocked.Clear();
+
             OnUIElementGrabbed.Clear();
             OnUIElementReleased.Clear();
             OnUIElementBounced.Clear();
+            OnUIElementContextLost.Clear();
+            OnUIElementContextRestored.Clear();
+            OnUIElementBrokenGlyph.Clear();
         }
     }
 }

@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 882266143405201081}
   - component: {fileID: -3733307605835872196}
   - component: {fileID: 3910226692358406294}
+  - component: {fileID: 111697611004193382}
   m_Layer: 6
   m_Name: Image 1
   m_TagString: Untagged
@@ -31,7 +32,7 @@ RectTransform:
   m_GameObject: {fileID: 6010142254615868885}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.05, y: 0.05, z: 0.05}
+  m_LocalScale: {x: 0.44000003, y: 0.44000003, z: 0.44000003}
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 3372957417764496505}
@@ -39,8 +40,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -232.7851, y: -79.02694}
-  m_SizeDelta: {x: 0, y: 0}
+  m_AnchoredPosition: {x: -230.9581, y: -80.11673}
+  m_SizeDelta: {x: 0, y: 80}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &4939520925260971589
 CanvasRenderer:
@@ -70,7 +71,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 6166919251031976991, guid: e6c66185a2ab5a5439471fb6f3fd9b34, type: 3}
+  m_Sprite: {fileID: -1646919010866140972, guid: 21fbf9f867455524caf65eb40c97aa06, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -92,13 +93,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eb160400b491a4a4684c32aca8b455be, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mass: 1
+  mass: 1.08
   drag: 1.5
   angularDrag: 1
   useGravity: 1
   isKinematic: 0
-  gravityScale: 0.3
-  isFloating: 1
+  gravityScale: 1
   isFixed: 0
   fixedColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
   normalColor: {r: 1, g: 1, b: 1, a: 1}
@@ -110,6 +110,7 @@ MonoBehaviour:
     m_Bits: 4294967295
   collisionCheckDistance: 0.05
   isPlatform: 1
+  autoLockOnWallCollision: 0
   constrainToParent: 1
   boundaryPadding:
     m_Left: 0
@@ -117,8 +118,12 @@ MonoBehaviour:
     m_Top: 0
     m_Bottom: 0
   contentText: {fileID: 5965861597528683855}
-  maxWidth: 5
-  dragRotationStrength: 8
+  dragRotationStrength: 2
+  bubbleScale: 0.05
+  bubbleHeight: 10
+  fontSize: 50
+  textScale: 0.1
+  textPaddingHorizontal: 0
 --- !u!114 &882266143405201081
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -135,6 +140,8 @@ MonoBehaviour:
   highlightOnHover: 1
   dragSpeed: 15
   releaseVelocityMultiplier: 5
+  typeProfile: {fileID: 11400000, guid: f832a5915f388b74ba5239e759225fa6, type: 2}
+  contextConstraint: {fileID: 111697611004193382}
   normalColor: {r: 1, g: 1, b: 1, a: 1}
   hoverColor: {r: 1, g: 1, b: 1, a: 1}
   draggingColor: {r: 1, g: 1, b: 1, a: 1}
@@ -167,8 +174,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3245ec927659c4140ac4f8d17403cc18, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_HorizontalFit: 2
-  m_VerticalFit: 2
+  m_HorizontalFit: 0
+  m_VerticalFit: 0
 --- !u!114 &3910226692358406294
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -195,6 +202,28 @@ MonoBehaviour:
   m_ChildScaleWidth: 0
   m_ChildScaleHeight: 0
   m_ReverseArrangement: 0
+--- !u!114 &111697611004193382
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6010142254615868885}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 25921cf3da6c58547a7f0d83e53fed05, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  constraintType: 3
+  validArea: {fileID: 0}
+  areaPadding: {x: 20, y: 20}
+  signalSource: {fileID: 0}
+  maxRange: 30
+  signalFadeStart: 1
+  violationBehavior: 4
+  restoreDelay: 0.3
+  checkOnReleaseOnly: 1
+  enabled: 1
 --- !u!1 &7206984022955703221
 GameObject:
   m_ObjectHideFlags: 0
@@ -222,7 +251,7 @@ RectTransform:
   m_GameObject: {fileID: 7206984022955703221}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.94, y: 0.94, z: 0.094000004}
+  m_LocalScale: {x: 0.15853, y: 0.15853, z: 0.015853}
   m_ConstrainProportionsScale: 1
   m_Children: []
   m_Father: {fileID: 5323495470288427571}
@@ -262,12 +291,12 @@ MonoBehaviour:
       m_Calls: []
   m_FontData:
     m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
-    m_FontSize: 14
+    m_FontSize: 1
     m_FontStyle: 0
     m_BestFit: 0
-    m_MinSize: 10
-    m_MaxSize: 40
-    m_Alignment: 3
+    m_MinSize: 1
+    m_MaxSize: 191
+    m_Alignment: 0
     m_AlignByGeometry: 0
     m_RichText: 1
     m_HorizontalOverflow: 1

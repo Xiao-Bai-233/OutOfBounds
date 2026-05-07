@@ -2,6 +2,8 @@ using UnityEngine;
 using OutOfBounds.UI;
 using OutOfBounds.Player;
 using OutOfBounds.DragSystem;
+using OutOfBounds.Puzzle;
+using OutOfBounds.Data;
 
 namespace OutOfBounds.Physics
 {
@@ -39,6 +41,17 @@ namespace OutOfBounds.Physics
     [Header("任务窗口配置")]
     [SerializeField] private Vector2 taskWindowSize = new Vector2(400f, 200f);
     [SerializeField] private Vector2 taskWindowCollisionSize = new Vector2(4f, 2f); // 碰撞体积大小
+
+    [Header("UI 类型配置（Phase 2 新增）")]
+    [Tooltip("任务窗口的 UI 类型 Profile — 拖入 Profile_Window.asset")]
+    [SerializeField] private UITypeProfile windowTypeProfile;
+
+    [Header("信号区配置（Phase 2 新增）")]
+    [Tooltip("Quest Log 的有效信号区域 — 玩家在此区域内才能用 Tab 召唤")]
+    [SerializeField] private Transform windowSignalRegion;
+
+    [Tooltip("信号区范围半径")]
+    [SerializeField] private float windowSignalRange = 20f;
 
         #region Unity 生命周期
 
@@ -348,12 +361,30 @@ namespace OutOfBounds.Physics
                 physicsElement.drag = 2f;
                 physicsElement.useGravity = true;
                 physicsElement.isPlatform = true; // 允许玩家站在上面
-                physicsElement.isFloating = false; // 不漂浮，受重力影响
 
                 // 添加DraggableUI组件
                 var draggable = taskWindowObj.AddComponent<OutOfBounds.DragSystem.DraggableUI>();
                 draggable.canBeDragged = true;
                 draggable.enableRKeyReset = true; // 允许按R键重置位置
+
+                // ★ Phase 2: 应用 UI 类型 Profile + 上下文限制
+                // Profile 从 Inspector 中拖入的 windowTypeProfile 读取
+                if (windowTypeProfile != null)
+                {
+                    windowTypeProfile.ApplyTo(physicsElement);
+                    windowTypeProfile.ApplyTo(draggable);
+                }
+
+                // 添加 UIContextConstraint — 窗口离开信号区后透明化并回收
+                var contextConstraint = taskWindowObj.AddComponent<UIContextConstraint>();
+                contextConstraint.IsEnabled = true;
+                // 默认行为由 Inspector 配置，这里设置信号源
+                if (windowSignalRegion != null)
+                {
+                    // 使用反射设置私有字段（或通过公共方法）
+                    // 由于 SignalSource 是序列化字段，可以在 Inspector 中手动绑定
+                    // 或者通过代码：见下方注释
+                }
 
                 // 添加BoxCollider2D，用于物理碰撞
                 var collider = taskWindowObj.AddComponent<BoxCollider2D>();

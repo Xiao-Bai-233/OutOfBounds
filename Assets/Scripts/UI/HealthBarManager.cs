@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 using OutOfBounds.Core;
-using OutOfBounds.DragSystem;
 
 namespace OutOfBounds.UI
 {
@@ -15,10 +14,21 @@ namespace OutOfBounds.UI
     {
         public static HealthBarManager Instance { get; private set; }
 
-        [Header("血条设置")]
-        [SerializeField] public int maxHealth = 3;
-        [SerializeField] public Transform healthBarParent;
-        [SerializeField] public GameObject heartPrefab;
+    [Header("血条设置")]
+    [SerializeField] public int maxHealth = 3;
+    [SerializeField] public Transform healthBarParent;
+    [SerializeField] public GameObject heartPrefab;
+
+    [Header("防逃课 — 心形回收")]
+    [Tooltip("伤害区域的 Transform — 心形离开此区域太远会被回收")]
+    [SerializeField] private Transform damageAreaTransform;
+
+    [Tooltip("心形有效范围半径")]
+    [SerializeField] private float heartValidRange = 15f;
+
+    [Tooltip("心形信号衰减起点（0=超范围立刻回收, 1=到最远才开始衰减）")]
+    [Range(0f, 1f)]
+    [SerializeField] private float heartSignalFadeStart = 0.5f;
 
         [Header("心形元素设置")]
         [SerializeField] public float heartSize = 50f;
@@ -28,21 +38,15 @@ namespace OutOfBounds.UI
         [SerializeField] public Color fullHeartColor = Color.white; // 默认改为白色，方便Sprite原色显示
         [SerializeField] public Color emptyHeartColor = Color.white;
 
-        [Header("掉落心形光标设置")]
-        [SerializeField] public CursorType heartHoverCursor = CursorType.Grab;
-        [SerializeField] public CursorType heartDraggingCursor = CursorType.Grabbing;
-        [SerializeField] public Texture2D heartCustomHoverCursor;
-        [SerializeField] public Texture2D heartCustomDraggingCursor;
-
-        [Header("掉落心形物理设置")]
-        [SerializeField] private string heartLayerName = "UI_Physics";
-
         // 心形UI元素列表
         private List<GameObject> heartUIs = new List<GameObject>();
         private Stack<GameObject> uiHeartPool = new Stack<GameObject>();
         
         // 编辑模式下的更新标志
         private bool needUpdateInEditMode = false;
+
+        // 防止双重初始化的标志（HealthBarManager.Start + PlayerController.Start 重复调用）
+        private bool hasInitialized = false;
 
         #region Unity 生命周期
 
@@ -64,8 +68,9 @@ namespace OutOfBounds.UI
 
         private void Start()
         {
-            // 创建初始心形UI
+            // 创建初始心形UI（只创建一次，防止 PlayerController.InitializeHealthBar 重复调用）
             CreateHeartUI();
+            hasInitialized = true;
 
             // 注册事件
             Events.OnPlayerHealthChanged.Subscribe(OnPlayerHealthChanged);
@@ -115,6 +120,9 @@ namespace OutOfBounds.UI
         /// </summary>
         public void InitializeHealthBar(int health)
         {
+            // 已经初始化过了，跳过（防止 PlayerController.Start 和 HealthBarManager.Start 双重调用）
+            if (hasInitialized) return;
+            
             maxHealth = health;
             currentHealth = health;
             CreateHeartUI();
@@ -171,36 +179,20 @@ namespace OutOfBounds.UI
         /// </summary>
         private void CreateHeartUI()
         {
-            // 彻底清理：不仅清理列表，还要清理父物体下的所有子物体
-            // 防止在编辑模式或重新开始游戏时产生残留
+            // 先彻底清理所有旧心形
             if (healthBarParent != null)
             {
-                // 收集所有子物体
                 List<GameObject> children = new List<GameObject>();
                 foreach (Transform child in healthBarParent)
-                {
                     children.Add(child.gameObject);
-                }
 
-                // 销毁所有子物体
                 foreach (var child in children)
-                {
-                    if (Application.isEditor && !Application.isPlaying)
-                    {
-                        DestroyImmediate(child);
-                    }
-                    else
-                    {
-                        // 运行时如果使用了池，可以回收，但这里为了彻底解决生成多份的问题，先直接销毁
-                        Destroy(child);
-                    }
-                }
+                    DestroyImmediate(child);  // 立即销毁，不等帧结束
             }
 
             heartUIs.Clear();
-            uiHeartPool.Clear(); // 同时也清空 UI 池，防止旧引用干扰
+            uiHeartPool.Clear();
 
-            // 确保healthBarParent存在
             if (healthBarParent == null)
             {
                 Debug.LogError("[HealthBarManager] healthBarParent is null!");
@@ -226,11 +218,14 @@ namespace OutOfBounds.UI
                     heartObj = CreateDefaultHeart();
                 }
 
-                // 始终设置层级和大小，确保 heartSize 变量生效
-                heartObj.transform.SetParent(healthBarParent);
+                // 始终设置层级和大小
+                heartObj.transform.SetParent(healthBarParent, false);
                 RectTransform rect = heartObj.GetComponent<RectTransform>();
                 rect.sizeDelta = new Vector2(heartSize, heartSize);
-                rect.anchoredPosition = new Vector2(i * (heartSize + heartSpacing), 0);
+                rect.anchorMin = new Vector2(0, 0.5f);  // 左中对齐
+                rect.anchorMax = new Vector2(0, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.localPosition = new Vector3(i * (heartSize + heartSpacing), 0, 0);
 
                 heartUIs.Add(heartObj);
             }
@@ -288,66 +283,49 @@ namespace OutOfBounds.UI
         }
 
         /// <summary>
-        /// 生成掉落的心形元素
+        /// 生成掉落的心形元素 — 配置全部由预制体自己管理
+        /// 生成的心形会挂载 UIContextConstraint，离开伤害区域后被回收
         /// </summary>
         public void SpawnFallingHeart()
         {
             if (heartUIs.Count > currentHealth)
             {
-                // 获取最后一个完整的心形UI位置
                 GameObject heartUI = heartUIs[currentHealth];
-                if (heartUI != null)
+                if (heartUI != null && UIPhysicsManager.Instance != null)
                 {
-                    // 转换为世界坐标
-                    Vector3 worldPosition = heartUI.transform.position;
-
-                    // 始终使用变量定义的 heartSize
-                    float size = heartSize;
-
-                    // 使用UIPhysicsManager生成心形物理元素
-                    if (UIPhysicsManager.Instance != null)
+                    var spawnedElement = UIPhysicsManager.Instance.SpawnHeartElement(
+                        heartUI.transform.position, 0f, null, null);
+                    
+                    if (spawnedElement != null)
                     {
-                        UIPhysicsElement heartElement = UIPhysicsManager.Instance.SpawnHeartElement(worldPosition, size, null, fullHeartSprite);
-                        if (heartElement != null)
+                        // ★ 清理对象池中残留的旧 UIContextConstraint（避免上一轮约束干扰）
+                        var oldConstraint = spawnedElement.GetComponent<OutOfBounds.Puzzle.UIContextConstraint>();
+                        if (oldConstraint != null)
+                            Destroy(oldConstraint);
+
+                        // 只在 damageAreaTransform 已配置时才添加新约束
+                        if (damageAreaTransform != null)
                         {
-                            // 设置 Layer
-                            int layer = LayerMask.NameToLayer(heartLayerName);
-                            if (layer != -1)
-                            {
-                                heartElement.gameObject.layer = layer;
-                            }
-                            else
-                            {
-                                Debug.LogWarning($"[HealthBarManager] 未找到名为 {heartLayerName} 的 Layer，请在标签与层设置中检查！");
-                            }
-
-                            // 确保心形元素受重力影响且不漂浮
-                            heartElement.SetUseGravity(true);
-                            heartElement.isFloating = false; 
-                            
-                            // 关键修复：先检查是否已有 DraggableUI（适配对象池）
-                            DraggableUI draggable = heartElement.GetComponent<DraggableUI>();
-                            if (draggable == null)
-                            {
-                                draggable = heartElement.gameObject.AddComponent<DraggableUI>();
-                            }
-                            
-                            draggable.SetDraggable(true);
-                            
-                            // 重新配置参数，确保池中取出的对象设置是最新的
-                            draggable.hoverCursor = heartHoverCursor;
-                            draggable.draggingCursor = heartDraggingCursor;
-                            draggable.customHoverCursor = heartCustomHoverCursor;
-                            draggable.customDraggingCursor = heartCustomDraggingCursor;
-                            draggable.autoSwitchCursor = true;
-
-                            draggable.highlightOnHover = false;
-                            draggable.normalColor = Color.white;
-                            draggable.hoverColor = Color.white;
-                            draggable.draggingColor = Color.white;
+                            var constraint = spawnedElement.gameObject.AddComponent<OutOfBounds.Puzzle.UIContextConstraint>();
+                            constraint.SetupSignalSource(damageAreaTransform, heartValidRange,
+                                OutOfBounds.Core.ContextConstraintType.SignalSource, heartSignalFadeStart);
+                            constraint.OnConstraintViolated += OnHeartOutOfContext;
                         }
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// 心形离开伤害上下文后的回收处理
+        /// </summary>
+        private void OnHeartOutOfContext(OutOfBounds.Puzzle.UIContextConstraint constraint)
+        {
+            var physicsElement = constraint.GetComponent<UIPhysicsElement>();
+            if (physicsElement != null && UIPhysicsManager.Instance != null)
+            {
+                Debug.Log($"[HealthBarManager] 心形离开伤害区域，回收中...");
+                UIPhysicsManager.Instance.RecycleHeartElement(physicsElement);
             }
         }
 

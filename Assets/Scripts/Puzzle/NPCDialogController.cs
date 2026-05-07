@@ -33,6 +33,14 @@ namespace OutOfBounds.Puzzle
         [SerializeField] private float clickCooldown = 0.8f; // 每次点击的冷却时间
         [SerializeField] private bool loopDialogs = true; // 对话内容是否循环
 
+        [Header("防逃课 — 气泡依附")]
+        [Tooltip("气泡有效范围半径 — 离开 NPC 超过此距离会被回收")]
+        [SerializeField] private float bubbleValidRange = 12f;
+
+        [Tooltip("气泡信号衰减起点（0=超范围立刻回收, 1=到最远才开始衰减）")]
+        [Range(0f, 1f)]
+        [SerializeField] private float bubbleSignalFadeStart = 0.5f;
+
         [Header("NPC 视觉反馈")]
         [SerializeField] private Color highlightColor = Color.yellow;
         private Color originalColor;
@@ -186,6 +194,13 @@ namespace OutOfBounds.Puzzle
             // 5. 给一个向上且带微小随机侧向的初速度
             Vector2 randomForce = new Vector2(Random.Range(-1f, 1f), initialForce.y);
             bubble.AddForce(randomForce);
+
+            // 6. Phase 2: 给气泡添加约束 — 离开 NPC 太远就被回收
+            var constraint = currentActiveBubble.GetComponent<OutOfBounds.Puzzle.UIContextConstraint>();
+            if (constraint == null)
+                constraint = currentActiveBubble.AddComponent<OutOfBounds.Puzzle.UIContextConstraint>();
+            constraint.SetupSignalSource(transform, bubbleValidRange,
+                OutOfBounds.Core.ContextConstraintType.ParentAttachment, bubbleSignalFadeStart);
 
             // 视觉反馈效果
             OnInteractStart();
